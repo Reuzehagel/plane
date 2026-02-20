@@ -35,3 +35,8 @@ export interface Point {
   x: number;
   y: number;
 }
+
+export interface BoxSelectState {
+  start: Point;
+  current: Point;
+}
