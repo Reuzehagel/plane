@@ -19,7 +19,7 @@
 
 ## Cards
 
-- [ ] Card resizing (drag handles)
+- [x] Card resizing (drag handles)
 - [ ] Multiline text / richer content
 - [ ] Card colors or labels
 - [ ] Snap to grid (optional)
@@ -40,6 +40,6 @@
 
 - [ ] Minimap
 - [ ] Zoom controls UI (buttons, percentage)
-- [ ] Right-click context menu
+- [x] Right-click context menu
 - [ ] Smooth animated zoom
 - [ ] Touch/trackpad gesture support

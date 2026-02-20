@@ -1,3 +1,8 @@
+export interface Point {
+  x: number;
+  y: number;
+}
+
 export interface Card {
   id: string;
   x: number;
@@ -7,20 +12,16 @@ export interface Card {
   title: string;
 }
 
-export interface Camera {
-  x: number;
-  y: number;
+export interface Camera extends Point {
   zoom: number;
 }
 
-export interface DragOffset {
-  card: Card;
-  offsetX: number;
-  offsetY: number;
-}
-
 export interface DragState {
-  offsets: DragOffset[];
+  offsets: Array<{
+    card: Card;
+    offsetX: number;
+    offsetY: number;
+  }>;
 }
 
 export interface EditingState {
@@ -29,11 +30,6 @@ export interface EditingState {
   screenY: number;
   screenWidth: number;
   screenHeight: number;
-}
-
-export interface Point {
-  x: number;
-  y: number;
 }
 
 export interface BoxSelectState {

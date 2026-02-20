@@ -1,6 +1,5 @@
+import { MAX_UNDO } from "./constants";
 import type { Card, History, Snapshot } from "./types";
-
-const MAX_UNDO = 100;
 
 function cloneSnapshot(cards: Card[], selectedCardIds: Set<string>): Snapshot {
   return {
@@ -19,14 +18,14 @@ export function pushSnapshot(
   history.redoStack.length = 0;
 }
 
-function restoreFrom(
+function restore(
   from: Snapshot[],
-  saveTo: Snapshot[],
+  to: Snapshot[],
   cards: Card[],
   selectedCardIds: Set<string>,
 ): Snapshot | null {
   if (from.length === 0) return null;
-  saveTo.push(cloneSnapshot(cards, selectedCardIds));
+  to.push(cloneSnapshot(cards, selectedCardIds));
   return from.pop()!;
 }
 
@@ -35,7 +34,7 @@ export function undo(
   cards: Card[],
   selectedCardIds: Set<string>,
 ): Snapshot | null {
-  return restoreFrom(history.undoStack, history.redoStack, cards, selectedCardIds);
+  return restore(history.undoStack, history.redoStack, cards, selectedCardIds);
 }
 
 export function redo(
@@ -43,5 +42,5 @@ export function redo(
   cards: Card[],
   selectedCardIds: Set<string>,
 ): Snapshot | null {
-  return restoreFrom(history.redoStack, history.undoStack, cards, selectedCardIds);
+  return restore(history.redoStack, history.undoStack, cards, selectedCardIds);
 }

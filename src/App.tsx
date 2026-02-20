@@ -1,14 +1,32 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
 import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, Snapshot } from "./types";
-import { mouseToWorld, hitTestCards, hitTestHandles, worldToScreen } from "./geometry";
+import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot, undo, redo } from "./history";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS, NUDGE_AMOUNT,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
+  CARD_FONT_SIZE, CARD_TEXT_PAD,
 } from "./constants";
+
+// Pairs useState with a ref that stays in sync, so imperative event handlers
+// can always read the latest value without stale closures.
+function useRefState<T>(initial: T): [T, React.RefObject<T>, React.Dispatch<React.SetStateAction<T>>] {
+  const [state, setState] = useState<T>(initial);
+  const ref = useRef<T>(initial);
+  useEffect(() => { ref.current = state; }, [state]);
+  return [state, ref, setState];
+}
+
+// Resize-direction multipliers: [dx sign for width, dy sign for height, moves X origin, moves Y origin]
+const RESIZE_DIR: Record<HandleCorner, { wSign: number; hSign: number; movesX: boolean; movesY: boolean }> = {
+  se: { wSign:  1, hSign:  1, movesX: false, movesY: false },
+  sw: { wSign: -1, hSign:  1, movesX: true,  movesY: false },
+  ne: { wSign:  1, hSign: -1, movesX: false, movesY: true  },
+  nw: { wSign: -1, hSign: -1, movesX: true,  movesY: true  },
+};
 
 function App(): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -25,11 +43,8 @@ function App(): React.JSX.Element {
 
   const history = useRef<History>({ undoStack: [], redoStack: [] });
 
-  const [editing, setEditing] = useState<EditingState | null>(null);
-  const editingRef = useRef<EditingState | null>(null);
-
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const contextMenuRef = useRef<ContextMenuState | null>(null);
+  const [editing, editingRef, setEditing] = useRefState<EditingState | null>(null);
+  const [contextMenu, contextMenuRef, setContextMenu] = useRefState<ContextMenuState | null>(null);
   const clipboard = useRef<Card | null>(null);
 
   const draw = useCallback((): void => {
@@ -58,17 +73,44 @@ function App(): React.JSX.Element {
     selectedCardIds.current.delete(cardId);
   }
 
-  // Keep refs in sync with state so imperative event handlers can read them
-  useEffect(() => {
-    editingRef.current = editing;
-  }, [editing]);
+  function createCard(x: number, y: number, width: number, height: number, title: string): Card {
+    return { id: crypto.randomUUID(), x, y, width, height, title };
+  }
 
-  useEffect(() => {
-    contextMenuRef.current = contextMenu;
-  }, [contextMenu]);
+  function insertCard(card: Card): void {
+    cards.current.push(card);
+    selectCard(card.id);
+  }
 
-  function closeContextMenu(): void {
-    setContextMenu(null);
+  function findCard(cardId: string): Card | undefined {
+    return cards.current.find((c) => c.id === cardId);
+  }
+
+  function selectCard(cardId: string): void {
+    selectedCardIds.current.clear();
+    selectedCardIds.current.add(cardId);
+  }
+
+  function selectAllCards(): void {
+    selectedCardIds.current = new Set(cards.current.map((c) => c.id));
+  }
+
+  function openEditor(card: Card): void {
+    const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
+    const zoom = camera.current.zoom;
+    setEditing({
+      cardId: card.id,
+      screenX: sx,
+      screenY: sy,
+      screenWidth: card.width * zoom,
+      screenHeight: card.height * zoom,
+    });
+  }
+
+  // Returns the card targeted by the context menu, or null if missing
+  function getMenuCard(): Card | undefined {
+    if (!contextMenu?.cardId) return undefined;
+    return findCard(contextMenu.cardId);
   }
 
   useEffect(() => {
@@ -99,9 +141,7 @@ function App(): React.JSX.Element {
         canvas.style.cursor = "grabbing";
         return;
       }
-      const rect = canvas.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
+      const { x: sx, y: sy } = mouseToScreen(e, canvas);
       const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
       if (handleHit) {
         canvas.style.cursor = handleCursor(handleHit.handle);
@@ -119,8 +159,7 @@ function App(): React.JSX.Element {
       const hit = hitTestCards(world.x, world.y, cards.current);
 
       if (hit && !selectedCardIds.current.has(hit.id)) {
-        selectedCardIds.current.clear();
-        selectedCardIds.current.add(hit.id);
+        selectCard(hit.id);
         scheduleRedraw();
       }
 
@@ -133,6 +172,12 @@ function App(): React.JSX.Element {
       });
     }
 
+    function startPanning(e: MouseEvent): void {
+      isPanning.current = true;
+      lastMouse.current = { x: e.clientX, y: e.clientY };
+      canvas!.style.cursor = "grabbing";
+    }
+
     function onMouseDown(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
 
@@ -143,124 +188,91 @@ function App(): React.JSX.Element {
 
       // Middle-click always pans
       if (e.button === 1) {
-        isPanning.current = true;
-        lastMouse.current = { x: e.clientX, y: e.clientY };
-        canvas.style.cursor = "grabbing";
+        startPanning(e);
         e.preventDefault();
         return;
       }
 
-      if (e.button === 0) {
-        // Check handle hit before card hit
-        const rect = canvas.getBoundingClientRect();
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
-        const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
-        if (handleHit) {
-          saveSnapshot();
-          resizeState.current = {
-            card: handleHit.card,
-            handle: handleHit.handle,
-            startMouseX: sx,
-            startMouseY: sy,
-            startX: handleHit.card.x,
-            startY: handleHit.card.y,
-            startWidth: handleHit.card.width,
-            startHeight: handleHit.card.height,
-          };
-          canvas.style.cursor = handleCursor(handleHit.handle);
-          return;
-        }
+      if (e.button !== 0) return;
 
-        const world = mouseToWorld(e, canvas, camera.current);
-        const hit = hitTestCards(world.x, world.y, cards.current);
-        if (hit) {
-          if (e.shiftKey) {
-            const sel = selectedCardIds.current;
-            if (sel.has(hit.id)) sel.delete(hit.id);
-            else sel.add(hit.id);
-            scheduleRedraw();
-          } else {
-            if (!selectedCardIds.current.has(hit.id)) {
-              selectedCardIds.current.clear();
-              selectedCardIds.current.add(hit.id);
-            }
-            saveSnapshot();
-            dragState.current = {
-              offsets: cards.current
-                .filter((c) => selectedCardIds.current.has(c.id))
-                .map((c) => ({ card: c, offsetX: world.x - c.x, offsetY: world.y - c.y })),
-            };
-            // Bring selected cards to front, preserving relative order
-            const rest: Card[] = [];
-            const selected: Card[] = [];
-            for (const c of cards.current) {
-              if (selectedCardIds.current.has(c.id)) selected.push(c);
-              else rest.push(c);
-            }
-            cards.current = [...rest, ...selected];
-            scheduleRedraw();
-            canvas.style.cursor = "grabbing";
-          }
-        } else {
-          if (e.shiftKey) {
-            boxSelect.current = { start: world, current: world };
-          } else {
-            selectedCardIds.current.clear();
-            isPanning.current = true;
-            lastMouse.current = { x: e.clientX, y: e.clientY };
-            canvas.style.cursor = "grabbing";
-            scheduleRedraw();
-          }
-        }
+      const { x: sx, y: sy } = mouseToScreen(e, canvas);
+      const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
+      if (handleHit) {
+        saveSnapshot();
+        resizeState.current = {
+          card: handleHit.card,
+          handle: handleHit.handle,
+          startMouseX: sx,
+          startMouseY: sy,
+          startX: handleHit.card.x,
+          startY: handleHit.card.y,
+          startWidth: handleHit.card.width,
+          startHeight: handleHit.card.height,
+        };
+        canvas.style.cursor = handleCursor(handleHit.handle);
+        return;
       }
+
+      const world = mouseToWorld(e, canvas, camera.current);
+      const hit = hitTestCards(world.x, world.y, cards.current);
+
+      if (!hit) {
+        if (e.shiftKey) {
+          boxSelect.current = { start: world, current: world };
+        } else {
+          selectedCardIds.current.clear();
+          startPanning(e);
+          scheduleRedraw();
+        }
+        return;
+      }
+
+      if (e.shiftKey) {
+        const sel = selectedCardIds.current;
+        if (sel.has(hit.id)) sel.delete(hit.id);
+        else sel.add(hit.id);
+        scheduleRedraw();
+        return;
+      }
+
+      if (!selectedCardIds.current.has(hit.id)) {
+        selectCard(hit.id);
+      }
+      saveSnapshot();
+      dragState.current = {
+        offsets: cards.current
+          .filter((c) => selectedCardIds.current.has(c.id))
+          .map((c) => ({ card: c, offsetX: world.x - c.x, offsetY: world.y - c.y })),
+      };
+      // Bring selected cards to front, preserving relative order
+      const rest: Card[] = [];
+      const selected: Card[] = [];
+      for (const c of cards.current) {
+        if (selectedCardIds.current.has(c.id)) selected.push(c);
+        else rest.push(c);
+      }
+      cards.current = [...rest, ...selected];
+      scheduleRedraw();
+      canvas.style.cursor = "grabbing";
     }
 
     function onMouseMove(e: MouseEvent): void {
       if (!canvas) return;
 
       if (resizeState.current) {
-        const rect = canvas.getBoundingClientRect();
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
+        const { x: sx, y: sy } = mouseToScreen(e, canvas);
         const rs = resizeState.current;
         const dx = (sx - rs.startMouseX) / camera.current.zoom;
         const dy = (sy - rs.startMouseY) / camera.current.zoom;
 
-        let newX = rs.startX;
-        let newY = rs.startY;
-        let newW = rs.startWidth;
-        let newH = rs.startHeight;
-
-        if (rs.handle === "se") {
-          newW = rs.startWidth + dx;
-          newH = rs.startHeight + dy;
-        } else if (rs.handle === "sw") {
-          newW = rs.startWidth - dx;
-          newH = rs.startHeight + dy;
-          newX = rs.startX + dx;
-        } else if (rs.handle === "ne") {
-          newW = rs.startWidth + dx;
-          newH = rs.startHeight - dy;
-          newY = rs.startY + dy;
-        } else if (rs.handle === "nw") {
-          newW = rs.startWidth - dx;
-          newH = rs.startHeight - dy;
-          newX = rs.startX + dx;
-          newY = rs.startY + dy;
-        }
-
-        // Clamp and fix position for corners that move origin
+        const dir = RESIZE_DIR[rs.handle];
+        const newW = rs.startWidth + dx * dir.wSign;
+        const newH = rs.startHeight + dy * dir.hSign;
         const clampedW = Math.max(CARD_MIN_WIDTH, Math.min(CARD_MAX_WIDTH, newW));
         const clampedH = Math.max(CARD_MIN_HEIGHT, Math.min(CARD_MAX_HEIGHT, newH));
 
-        if (rs.handle === "sw" || rs.handle === "nw") {
-          rs.card.x = newX + (newW - clampedW);
-        }
-        if (rs.handle === "ne" || rs.handle === "nw") {
-          rs.card.y = newY + (newH - clampedH);
-        }
-
+        if (dir.movesX) rs.card.x = rs.startX + dx + (newW - clampedW);
+        if (dir.movesY) rs.card.y = rs.startY + dy + (newH - clampedH);
         rs.card.width = clampedW;
         rs.card.height = clampedH;
         scheduleRedraw();
@@ -323,18 +335,6 @@ function App(): React.JSX.Element {
       updateCursor(e);
     }
 
-    function openEditor(card: Card): void {
-      const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
-      const zoom = camera.current.zoom;
-      setEditing({
-        cardId: card.id,
-        screenX: sx,
-        screenY: sy,
-        screenWidth: card.width * zoom,
-        screenHeight: card.height * zoom,
-      });
-    }
-
     function onDblClick(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
       const world = mouseToWorld(e, canvas, camera.current);
@@ -345,14 +345,7 @@ function App(): React.JSX.Element {
         return;
       }
 
-      const newCard: Card = {
-        id: crypto.randomUUID(),
-        x: world.x - CARD_WIDTH / 2,
-        y: world.y - CARD_HEIGHT / 2,
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
-        title: "",
-      };
+      const newCard = createCard(world.x - CARD_WIDTH / 2, world.y - CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, "");
       saveSnapshot();
       cards.current.push(newCard);
       scheduleRedraw();
@@ -369,12 +362,10 @@ function App(): React.JSX.Element {
       const delta = -e.deltaY * ZOOM_SENSITIVITY;
       const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + delta)));
 
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      const { x: mx, y: my } = mouseToScreen(e, canvas);
 
-      camera.current.x += mouseX / newZoom - mouseX / zoom;
-      camera.current.y += mouseY / newZoom - mouseY / zoom;
+      camera.current.x += mx / newZoom - mx / zoom;
+      camera.current.y += my / newZoom - my / zoom;
       camera.current.zoom = newZoom;
 
       scheduleRedraw();
@@ -409,7 +400,7 @@ function App(): React.JSX.Element {
       }
 
       if (e.key === "a" && mod) {
-        selectedCardIds.current = new Set(cards.current.map((c) => c.id));
+        selectAllCards();
         scheduleRedraw();
         e.preventDefault();
         return;
@@ -468,7 +459,7 @@ function App(): React.JSX.Element {
 
   function commitEdit(value: string): void {
     if (!editing) return;
-    const card = cards.current.find((c) => c.id === editing.cardId);
+    const card = findCard(editing.cardId);
     if (card) {
       if (value.trim() === "" && card.title === "") {
         removeCard(editing.cardId);
@@ -483,7 +474,7 @@ function App(): React.JSX.Element {
 
   function cancelEdit(): void {
     if (!editing) return;
-    const card = cards.current.find((c) => c.id === editing.cardId);
+    const card = findCard(editing.cardId);
     if (card && card.title === "") {
       removeCard(editing.cardId);
       scheduleRedraw();
@@ -492,57 +483,36 @@ function App(): React.JSX.Element {
   }
 
   function handleMenuEdit(): void {
-    if (!contextMenu?.cardId) return;
-    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    const card = getMenuCard();
     if (!card) return;
-    const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
-    const zoom = camera.current.zoom;
-    closeContextMenu();
-    setEditing({
-      cardId: card.id,
-      screenX: sx,
-      screenY: sy,
-      screenWidth: card.width * zoom,
-      screenHeight: card.height * zoom,
-    });
+    setContextMenu(null);
+    openEditor(card);
   }
 
   function handleMenuDuplicate(): void {
-    if (!contextMenu?.cardId) return;
-    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    const card = getMenuCard();
     if (!card) return;
     saveSnapshot();
-    const clone: Card = {
-      id: crypto.randomUUID(),
-      x: card.x + 20,
-      y: card.y + 20,
-      width: card.width,
-      height: card.height,
-      title: card.title,
-    };
-    cards.current.push(clone);
-    selectedCardIds.current.clear();
-    selectedCardIds.current.add(clone.id);
-    closeContextMenu();
+    const clone = createCard(card.x + 20, card.y + 20, card.width, card.height, card.title);
+    insertCard(clone);
+    setContextMenu(null);
     scheduleRedraw();
   }
 
   function handleMenuCopy(): void {
-    if (!contextMenu?.cardId) return;
-    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    const card = getMenuCard();
     if (!card) return;
     clipboard.current = { ...card };
-    closeContextMenu();
+    setContextMenu(null);
   }
 
   function handleMenuResetSize(): void {
-    if (!contextMenu?.cardId) return;
-    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    const card = getMenuCard();
     if (!card) return;
     saveSnapshot();
     card.width = CARD_WIDTH;
     card.height = CARD_HEIGHT;
-    closeContextMenu();
+    setContextMenu(null);
     scheduleRedraw();
   }
 
@@ -556,7 +526,7 @@ function App(): React.JSX.Element {
     } else {
       removeCard(contextMenu.cardId);
     }
-    closeContextMenu();
+    setContextMenu(null);
     scheduleRedraw();
   }
 
@@ -564,53 +534,26 @@ function App(): React.JSX.Element {
     if (!contextMenu || !clipboard.current) return;
     saveSnapshot();
     const src = clipboard.current;
-    const newCard: Card = {
-      id: crypto.randomUUID(),
-      x: contextMenu.worldX - src.width / 2,
-      y: contextMenu.worldY - src.height / 2,
-      width: src.width,
-      height: src.height,
-      title: src.title,
-    };
-    cards.current.push(newCard);
-    selectedCardIds.current.clear();
-    selectedCardIds.current.add(newCard.id);
-    closeContextMenu();
+    const newCard = createCard(
+      contextMenu.worldX - src.width / 2,
+      contextMenu.worldY - src.height / 2,
+      src.width, src.height, src.title,
+    );
+    insertCard(newCard);
+    setContextMenu(null);
     scheduleRedraw();
   }
 
   function handleMenuNewCard(): void {
     if (!contextMenu) return;
     saveSnapshot();
-    const newCard: Card = {
-      id: crypto.randomUUID(),
-      x: contextMenu.worldX - CARD_WIDTH / 2,
-      y: contextMenu.worldY - CARD_HEIGHT / 2,
-      width: CARD_WIDTH,
-      height: CARD_HEIGHT,
-      title: "",
-    };
-    cards.current.push(newCard);
-    selectedCardIds.current.clear();
-    selectedCardIds.current.add(newCard.id);
-    const { worldX, worldY } = contextMenu;
-    closeContextMenu();
+    const cardX = contextMenu.worldX - CARD_WIDTH / 2;
+    const cardY = contextMenu.worldY - CARD_HEIGHT / 2;
+    const newCard = createCard(cardX, cardY, CARD_WIDTH, CARD_HEIGHT, "");
+    insertCard(newCard);
+    setContextMenu(null);
     scheduleRedraw();
-    requestAnimationFrame(() => {
-      const { x: sx, y: sy } = worldToScreen(
-        worldX - CARD_WIDTH / 2,
-        worldY - CARD_HEIGHT / 2,
-        camera.current,
-      );
-      const zoom = camera.current.zoom;
-      setEditing({
-        cardId: newCard.id,
-        screenX: sx,
-        screenY: sy,
-        screenWidth: CARD_WIDTH * zoom,
-        screenHeight: CARD_HEIGHT * zoom,
-      });
-    });
+    requestAnimationFrame(() => openEditor(newCard));
   }
 
   return (
@@ -624,14 +567,12 @@ function App(): React.JSX.Element {
             top: editing.screenY,
             width: editing.screenWidth,
             height: editing.screenHeight,
-            fontSize: 14 * camera.current.zoom,
+            fontSize: CARD_FONT_SIZE * camera.current.zoom,
             borderRadius: CARD_RADIUS * camera.current.zoom,
-            padding: `0 ${10 * camera.current.zoom}px`,
+            padding: `0 ${CARD_TEXT_PAD * camera.current.zoom}px`,
           }}
           autoFocus
-          defaultValue={
-            cards.current.find((c) => c.id === editing.cardId)?.title ?? ""
-          }
+          defaultValue={findCard(editing.cardId)?.title ?? ""}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               commitEdit(e.currentTarget.value);

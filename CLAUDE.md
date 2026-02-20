@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just frontend` — frontend dev server only
 - `just install` — install dependencies (`bun install`)
 - Always use `bun`, never `npx` or `node_modules/.bin`
+- When asked to commit, always use the `/commit-commands:commit` skill
 
 ## Stack
 - Tauri 2 + React 19 + TypeScript + Vite

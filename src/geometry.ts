@@ -1,6 +1,10 @@
 import type { Camera, Card, HandleCorner, Point } from "./types";
 import { HANDLE_HIT_SIZE } from "./constants";
 
+function pointInRect(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
+  return px >= x && px <= x + w && py >= y && py <= y + h;
+}
+
 export function screenToWorld(sx: number, sy: number, cam: Camera): Point {
   return {
     x: sx / cam.zoom - cam.x,
@@ -15,17 +19,20 @@ export function worldToScreen(wx: number, wy: number, cam: Camera): Point {
   };
 }
 
-export function mouseToWorld(e: MouseEvent, canvas: HTMLCanvasElement, cam: Camera): Point {
+export function mouseToScreen(e: MouseEvent, canvas: HTMLCanvasElement): Point {
   const rect = canvas.getBoundingClientRect();
-  return screenToWorld(e.clientX - rect.left, e.clientY - rect.top, cam);
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+export function mouseToWorld(e: MouseEvent, canvas: HTMLCanvasElement, cam: Camera): Point {
+  const { x, y } = mouseToScreen(e, canvas);
+  return screenToWorld(x, y, cam);
 }
 
 export function hitTestCards(wx: number, wy: number, cards: Card[]): Card | null {
   for (let i = cards.length - 1; i >= 0; i--) {
     const c = cards[i];
-    if (wx >= c.x && wx <= c.x + c.width && wy >= c.y && wy <= c.y + c.height) {
-      return c;
-    }
+    if (pointInRect(wx, wy, c.x, c.y, c.width, c.height)) return c;
   }
   return null;
 }
@@ -45,16 +52,11 @@ export function hitTestHandles(
     const sw = card.width * cam.zoom;
     const sh = card.height * cam.zoom;
     const corners: [number, number, HandleCorner][] = [
-      [sx, sy, "nw"],
-      [sx + sw, sy, "ne"],
-      [sx, sy + sh, "sw"],
-      [sx + sw, sy + sh, "se"],
+      [sx, sy, "nw"], [sx + sw, sy, "ne"],
+      [sx, sy + sh, "sw"], [sx + sw, sy + sh, "se"],
     ];
     for (const [cx, cy, handle] of corners) {
-      if (
-        screenX >= cx - half && screenX <= cx + half &&
-        screenY >= cy - half && screenY <= cy + half
-      ) {
+      if (pointInRect(screenX, screenY, cx - half, cy - half, HANDLE_HIT_SIZE, HANDLE_HIT_SIZE)) {
         return { card, handle };
       }
     }

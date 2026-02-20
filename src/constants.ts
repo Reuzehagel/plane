@@ -22,3 +22,12 @@ export const CARD_MIN_WIDTH = 60;
 export const CARD_MIN_HEIGHT = 32;
 export const CARD_MAX_WIDTH = 800;
 export const CARD_MAX_HEIGHT = 600;
+export const CARD_FONT_SIZE = 14;
+export const CARD_TEXT_PAD = 10;
+export const CARD_TEXT_CLIP_PAD = 4;
+
+export const BG_COLOR = "#1a1a2e";
+export const BOX_SELECT_FILL = "rgba(122,122,255,0.1)";
+export const BOX_SELECT_STROKE = "rgba(122,122,255,0.5)";
+
+export const MAX_UNDO = 100;
