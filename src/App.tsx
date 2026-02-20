@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
 import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, HandleCorner, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
-import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen, snapToGrid, snapPoint, lerpSnap } from "./geometry";
+import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen, snapToGrid, snapPoint, lerpSnap, getContentBounds, isContentVisible } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot } from "./history";
 import {
@@ -9,11 +9,13 @@ import {
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
   CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS,
+  CAMERA_LERP, CAMERA_FOCAL_EPSILON, CAMERA_ZOOM_EPSILON, FIT_PADDING,
 } from "./constants";
 import { useKeyboard } from "./useKeyboard";
 import { createMenuHandlers } from "./menuHandlers";
 import { loadWorkspace, saveWorkspace } from "./persistence";
 import { Sidebar } from "./Sidebar";
+import { LocateFixed } from "lucide-react";
 
 // Pairs useState with a ref that stays in sync, so imperative event handlers
 // can always read the latest value without stale closures.
@@ -65,6 +67,8 @@ function App(): React.JSX.Element {
   const [gridSummaries, setGridSummaries] = useState<GridSummary[]>([]);
   const colorIndex = useRef(0);
   const [fontsReady, setFontsReady] = useState(false);
+  const [contentOffscreen, setContentOffscreen] = useState(false);
+  const cameraAnimId = useRef<number>(0);
 
   function refreshGridSummaries(): void {
     setGridSummaries(grids.current.map((g) => ({
@@ -88,7 +92,10 @@ function App(): React.JSX.Element {
     if (!ctxRef.current) ctxRef.current = canvas.getContext("2d");
     if (!ctxRef.current) return;
     const dpr = window.devicePixelRatio || 1;
-    drawScene(ctxRef.current, dpr, canvas.width / dpr, canvas.height / dpr, camera.current, cards.current, selectedCardIds.current, boxSelect.current);
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    drawScene(ctxRef.current, dpr, w, h, camera.current, cards.current, selectedCardIds.current, boxSelect.current);
+    setContentOffscreen(!isContentVisible(cards.current, camera.current, w, h));
   }, []);
 
   const scheduleRedraw = useCallback((): void => {
@@ -201,6 +208,64 @@ function App(): React.JSX.Element {
     scheduleRedraw();
     markDirty();
     requestAnimationFrame(() => openEditor(newCard));
+  }
+
+  function fitToContent(): void {
+    cancelAnimationFrame(cameraAnimId.current);
+
+    const viewW = window.innerWidth;
+    const viewH = window.innerHeight;
+    const bounds = getContentBounds(cards.current);
+
+    let targetFocalX = 0, targetFocalY = 0, targetZoom = 1;
+    if (bounds) {
+      const contentW = bounds.maxX - bounds.minX;
+      const contentH = bounds.maxY - bounds.minY;
+      targetZoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, Math.min(
+          (viewW - FIT_PADDING * 2) / contentW,
+          (viewH - FIT_PADDING * 2) / contentH,
+        ))
+      );
+      targetFocalX = bounds.minX + contentW / 2;
+      targetFocalY = bounds.minY + contentH / 2;
+    }
+
+    // focal = world-space point at screen center: screen/zoom - cam
+    const cam = camera.current;
+    let focalX = viewW / (2 * cam.zoom) - cam.x;
+    let focalY = viewH / (2 * cam.zoom) - cam.y;
+    let currentZoom = cam.zoom;
+
+    function animate(): void {
+      const dfx = targetFocalX - focalX;
+      const dfy = targetFocalY - focalY;
+      const dz = targetZoom - currentZoom;
+
+      if (Math.abs(dfx) < CAMERA_FOCAL_EPSILON && Math.abs(dfy) < CAMERA_FOCAL_EPSILON && Math.abs(dz) < CAMERA_ZOOM_EPSILON) {
+        focalX = targetFocalX;
+        focalY = targetFocalY;
+        currentZoom = targetZoom;
+      } else {
+        focalX += dfx * CAMERA_LERP;
+        focalY += dfy * CAMERA_LERP;
+        currentZoom += dz * CAMERA_LERP;
+      }
+
+      camera.current.x = viewW / (2 * currentZoom) - focalX;
+      camera.current.y = viewH / (2 * currentZoom) - focalY;
+      camera.current.zoom = currentZoom;
+      draw();
+
+      if (focalX === targetFocalX && focalY === targetFocalY && currentZoom === targetZoom) {
+        markDirty();
+        return;
+      }
+      cameraAnimId.current = requestAnimationFrame(animate);
+    }
+
+    cameraAnimId.current = requestAnimationFrame(animate);
   }
 
   function activateGrid(grid: Grid): void {
@@ -604,6 +669,7 @@ function App(): React.JSX.Element {
       cancelAnimationFrame(rafId.current);
       cancelAnimationFrame(dragRafId.current);
       cancelAnimationFrame(resizeRafId.current);
+      cancelAnimationFrame(cameraAnimId.current);
     };
   }, [scheduleRedraw]);
 
@@ -639,7 +705,7 @@ function App(): React.JSX.Element {
   useKeyboard({
     contextMenuRef, editingRef, selectedCardIds, cards, history,
     setContextMenu, saveSnapshot, deleteSelectedCards,
-    selectAllCards, applySnapshot, scheduleRedraw, markDirty,
+    selectAllCards, applySnapshot, fitToContent, scheduleRedraw, markDirty,
   });
 
   const {
@@ -665,6 +731,13 @@ function App(): React.JSX.Element {
         onDeleteGrid={deleteGrid}
         onRenameGrid={renameGrid}
       />
+      <button
+        className={`fit-to-content-btn${contentOffscreen ? "" : " hidden"}`}
+        onClick={fitToContent}
+        title="Fit to content (Ctrl+1)"
+      >
+        <LocateFixed size={16} strokeWidth={1.8} />
+      </button>
       <canvas ref={canvasRef} />
       {editing && (
         <input

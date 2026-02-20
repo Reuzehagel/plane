@@ -42,6 +42,39 @@ export function lerpSnap(current: number, target: number): number {
   return Math.abs(d) < SNAP_EPSILON ? target : current + d * SNAP_LERP;
 }
 
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+export function getContentBounds(cards: Card[]): Bounds | null {
+  if (cards.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of cards) {
+    if (c.x < minX) minX = c.x;
+    if (c.y < minY) minY = c.y;
+    if (c.x + c.width > maxX) maxX = c.x + c.width;
+    if (c.y + c.height > maxY) maxY = c.y + c.height;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function isContentVisible(cards: Card[], cam: Camera, viewW: number, viewH: number): boolean {
+  if (cards.length === 0) return true;
+  const vLeft = -cam.x;
+  const vTop = -cam.y;
+  const vRight = vLeft + viewW / cam.zoom;
+  const vBottom = vTop + viewH / cam.zoom;
+  for (const c of cards) {
+    if (c.x + c.width > vLeft && c.x < vRight && c.y + c.height > vTop && c.y < vBottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function hitTestCards(wx: number, wy: number, cards: Card[]): Card | null {
   for (let i = cards.length - 1; i >= 0; i--) {
     const c = cards[i];

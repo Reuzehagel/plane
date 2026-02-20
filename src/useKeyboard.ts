@@ -22,6 +22,7 @@ export interface KeyboardDeps {
   deleteSelectedCards: () => void;
   selectAllCards: () => void;
   applySnapshot: (s: Snapshot) => void;
+  fitToContent: () => void;
   scheduleRedraw: () => void;
   markDirty: () => void;
 }
@@ -66,6 +67,12 @@ export function useKeyboard(deps: KeyboardDeps): void {
       if ((e.key === "z" && mod && e.shiftKey) || (e.key === "y" && mod)) {
         const snapshot = redo(d.history.current, d.cards.current, d.selectedCardIds.current);
         if (snapshot) d.applySnapshot(snapshot);
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === "1" && mod) {
+        d.fitToContent();
         e.preventDefault();
         return;
       }

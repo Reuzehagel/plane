@@ -35,11 +35,11 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - `src/App.tsx` — Canvas app: event handling, editing overlay, all interaction logic
 - `src/types.ts` — Shared interfaces (Point, Card, Camera, DragState, EditingState, BoxSelectState, ContextMenuState, ResizeState, ResizeTarget, HandleCorner, Snapshot, History)
 - `src/constants.ts` — Visual and behavior constants
-- `src/geometry.ts` — Coordinate conversion, hit testing, and snap/lerp utilities (screenToWorld, worldToScreen, mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, getCardCorners, snapToGrid, snapPoint, lerpSnap)
+- `src/geometry.ts` — Coordinate conversion, hit testing, snap/lerp utilities, and viewport helpers (screenToWorld, worldToScreen, mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, getCardCorners, snapToGrid, snapPoint, lerpSnap, getContentBounds, isContentVisible)
 - `src/rendering.ts` — Canvas 2D draw functions (drawScene)
 - `src/history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
 - `src/menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
-- `src/useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all)
+- `src/useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all, fit-to-content)
 
 ### Rendering Pipeline
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
