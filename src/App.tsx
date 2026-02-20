@@ -63,7 +63,6 @@ function drawRoundRect(
   ctx.closePath();
 }
 
-/** Convert a mouse event to world coordinates relative to the canvas. */
 function mouseToWorld(e: MouseEvent, canvas: HTMLCanvasElement, cam: Camera): Point {
   const rect = canvas.getBoundingClientRect();
   return screenToWorld(e.clientX - rect.left, e.clientY - rect.top, cam);
@@ -77,8 +76,9 @@ function App(): React.JSX.Element {
   const rafId = useRef<number>(0);
 
   const cards = useRef<Card[]>([]);
-  const draggingCard = useRef<DragState | null>(null);
-  const selectedCardId = useRef<string | null>(null);
+  const dragState = useRef<DragState | null>(null);
+  const selectedCardIds = useRef<Set<string>>(new Set());
+  const boxSelect = useRef<{ start: Point; current: Point } | null>(null);
 
   const [editing, setEditing] = useState<EditingState | null>(null);
   const editingRef = useRef<EditingState | null>(null);
@@ -143,7 +143,7 @@ function App(): React.JSX.Element {
       drawRoundRect(ctx, sx, sy, sw, sh, sr);
       ctx.stroke();
 
-      if (card.id === selectedCardId.current) {
+      if (selectedCardIds.current.has(card.id)) {
         ctx.strokeStyle = CARD_SELECTED_BORDER;
         ctx.lineWidth = 2;
         drawRoundRect(ctx, sx, sy, sw, sh, sr);
@@ -162,6 +162,20 @@ function App(): React.JSX.Element {
       }
     }
 
+    if (boxSelect.current) {
+      const s = worldToScreen(boxSelect.current.start.x, boxSelect.current.start.y, camera.current);
+      const c = worldToScreen(boxSelect.current.current.x, boxSelect.current.current.y, camera.current);
+      const rx = Math.min(s.x, c.x);
+      const ry = Math.min(s.y, c.y);
+      const rw = Math.abs(c.x - s.x);
+      const rh = Math.abs(c.y - s.y);
+      ctx.fillStyle = "rgba(122,122,255,0.1)";
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = "rgba(122,122,255,0.5)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(rx, ry, rw, rh);
+    }
+
     ctx.restore();
   }, []);
 
@@ -172,9 +186,7 @@ function App(): React.JSX.Element {
 
   function removeCard(cardId: string): void {
     cards.current = cards.current.filter((c) => c.id !== cardId);
-    if (selectedCardId.current === cardId) {
-      selectedCardId.current = null;
-    }
+    selectedCardIds.current.delete(cardId);
   }
 
   // Keep editingRef in sync with state so imperative event handlers can read it
@@ -198,7 +210,7 @@ function App(): React.JSX.Element {
 
     function updateCursor(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
-      if (draggingCard.current || isPanning.current) {
+      if (dragState.current || isPanning.current) {
         canvas.style.cursor = "grabbing";
         return;
       }
@@ -223,26 +235,42 @@ function App(): React.JSX.Element {
       if (e.button === 0) {
         const hit = hitTestCards(world.x, world.y, cards.current);
         if (hit) {
-          selectedCardId.current = hit.id;
-          draggingCard.current = {
-            card: hit,
-            offsetX: world.x - hit.x,
-            offsetY: world.y - hit.y,
-          };
-          // Bring dragged card to front
-          const idx = cards.current.indexOf(hit);
-          if (idx !== -1 && idx !== cards.current.length - 1) {
-            cards.current.splice(idx, 1);
-            cards.current.push(hit);
+          if (e.shiftKey) {
+            const sel = selectedCardIds.current;
+            if (sel.has(hit.id)) sel.delete(hit.id);
+            else sel.add(hit.id);
+            scheduleRedraw();
+          } else {
+            if (!selectedCardIds.current.has(hit.id)) {
+              selectedCardIds.current.clear();
+              selectedCardIds.current.add(hit.id);
+            }
+            dragState.current = {
+              offsets: cards.current
+                .filter((c) => selectedCardIds.current.has(c.id))
+                .map((c) => ({ card: c, offsetX: world.x - c.x, offsetY: world.y - c.y })),
+            };
+            // Bring selected cards to front, preserving relative order
+            const rest: Card[] = [];
+            const selected: Card[] = [];
+            for (const c of cards.current) {
+              if (selectedCardIds.current.has(c.id)) selected.push(c);
+              else rest.push(c);
+            }
+            cards.current = [...rest, ...selected];
+            scheduleRedraw();
+            canvas.style.cursor = "grabbing";
           }
-          scheduleRedraw();
-          canvas.style.cursor = "grabbing";
         } else {
-          selectedCardId.current = null;
-          isPanning.current = true;
-          lastMouse.current = { x: e.clientX, y: e.clientY };
-          canvas.style.cursor = "grabbing";
-          scheduleRedraw();
+          if (e.shiftKey) {
+            boxSelect.current = { start: world, current: world };
+          } else {
+            selectedCardIds.current.clear();
+            isPanning.current = true;
+            lastMouse.current = { x: e.clientX, y: e.clientY };
+            canvas.style.cursor = "grabbing";
+            scheduleRedraw();
+          }
         }
       }
     }
@@ -250,10 +278,19 @@ function App(): React.JSX.Element {
     function onMouseMove(e: MouseEvent): void {
       if (!canvas) return;
 
-      if (draggingCard.current) {
+      if (boxSelect.current) {
         const world = mouseToWorld(e, canvas, camera.current);
-        draggingCard.current.card.x = world.x - draggingCard.current.offsetX;
-        draggingCard.current.card.y = world.y - draggingCard.current.offsetY;
+        boxSelect.current.current = world;
+        scheduleRedraw();
+        return;
+      }
+
+      if (dragState.current) {
+        const world = mouseToWorld(e, canvas, camera.current);
+        for (const entry of dragState.current.offsets) {
+          entry.card.x = world.x - entry.offsetX;
+          entry.card.y = world.y - entry.offsetY;
+        }
         scheduleRedraw();
         return;
       }
@@ -272,7 +309,26 @@ function App(): React.JSX.Element {
     }
 
     function onMouseUp(e: MouseEvent): void {
-      draggingCard.current = null;
+      if (boxSelect.current) {
+        const { start, current } = boxSelect.current;
+        const minX = Math.min(start.x, current.x);
+        const maxX = Math.max(start.x, current.x);
+        const minY = Math.min(start.y, current.y);
+        const maxY = Math.max(start.y, current.y);
+        for (const card of cards.current) {
+          if (
+            card.x + card.width > minX &&
+            card.x < maxX &&
+            card.y + card.height > minY &&
+            card.y < maxY
+          ) {
+            selectedCardIds.current.add(card.id);
+          }
+        }
+        boxSelect.current = null;
+        scheduleRedraw();
+      }
+      dragState.current = null;
       isPanning.current = false;
       updateCursor(e);
     }
@@ -335,9 +391,15 @@ function App(): React.JSX.Element {
 
     function onKeyDown(e: KeyboardEvent): void {
       if (editingRef.current) return;
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedCardId.current) {
-        removeCard(selectedCardId.current);
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedCardIds.current.size > 0) {
+        for (const id of selectedCardIds.current) {
+          removeCard(id);
+        }
         scheduleRedraw();
+      } else if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
+        selectedCardIds.current = new Set(cards.current.map((c) => c.id));
+        scheduleRedraw();
+        e.preventDefault();
       }
     }
 

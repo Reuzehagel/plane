@@ -13,10 +13,14 @@ export interface Camera {
   zoom: number;
 }
 
-export interface DragState {
+export interface DragOffset {
   card: Card;
   offsetX: number;
   offsetY: number;
+}
+
+export interface DragState {
+  offsets: DragOffset[];
 }
 
 export interface EditingState {

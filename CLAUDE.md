@@ -19,3 +19,8 @@
 - Use refs (not state) for high-frequency data (camera, cards, drag state)
 - Only use React state when a re-render is needed (e.g. editing overlay)
 - Keep comments to "why", not "what"
+
+## Architecture
+- All canvas interaction (mouse, keyboard) is handled via native event listeners in a single `useEffect`, not React event props
+- `scheduleRedraw()` after every ref mutation that affects visuals
+- Selection state (`selectedCardIds`) is a `Set<string>` ref, not React state
