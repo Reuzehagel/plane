@@ -1,0 +1,20 @@
+node_modules/
+dist/
+target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/Frameworks/
+
+# Env
+.env
+.env.*

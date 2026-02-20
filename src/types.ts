@@ -1,0 +1,33 @@
+export interface Card {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+}
+
+export interface Camera {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface DragState {
+  card: Card;
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface EditingState {
+  cardId: string;
+  screenX: number;
+  screenY: number;
+  screenWidth: number;
+  screenHeight: number;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
