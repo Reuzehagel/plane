@@ -71,11 +71,12 @@ export function drawScene(
 
     ctx.fillStyle = DOT_COLOR;
     for (let x = startX; x < w + spacing; x += spacing) {
+      ctx.beginPath();
       for (let y = startY; y < h + spacing; y += spacing) {
-        ctx.beginPath();
+        ctx.moveTo(x + dotR, y);
         ctx.arc(x, y, dotR, 0, TWO_PI);
-        ctx.fill();
       }
+      ctx.fill();
     }
   }
 

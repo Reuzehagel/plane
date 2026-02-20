@@ -117,6 +117,8 @@ function App(): React.JSX.Element {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let canvasRect = canvas.getBoundingClientRect();
+
     function resize(): void {
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
@@ -124,6 +126,7 @@ function App(): React.JSX.Element {
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = `${window.innerWidth}px`;
       canvas.style.height = `${window.innerHeight}px`;
+      canvasRect = canvas.getBoundingClientRect();
       scheduleRedraw();
     }
 
@@ -141,13 +144,13 @@ function App(): React.JSX.Element {
         canvas.style.cursor = "grabbing";
         return;
       }
-      const { x: sx, y: sy } = mouseToScreen(e, canvas);
+      const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
       const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
       if (handleHit) {
         canvas.style.cursor = handleCursor(handleHit.handle);
         return;
       }
-      const world = mouseToWorld(e, canvas, camera.current);
+      const world = mouseToWorld(e, canvasRect, camera.current);
       const hit = hitTestCards(world.x, world.y, cards.current);
       canvas.style.cursor = hit ? "default" : "grab";
     }
@@ -155,7 +158,7 @@ function App(): React.JSX.Element {
     function onContextMenu(e: MouseEvent): void {
       e.preventDefault();
       if (!canvas || editingRef.current) return;
-      const world = mouseToWorld(e, canvas, camera.current);
+      const world = mouseToWorld(e, canvasRect, camera.current);
       const hit = hitTestCards(world.x, world.y, cards.current);
 
       if (hit && !selectedCardIds.current.has(hit.id)) {
@@ -195,7 +198,7 @@ function App(): React.JSX.Element {
 
       if (e.button !== 0) return;
 
-      const { x: sx, y: sy } = mouseToScreen(e, canvas);
+      const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
       const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
       if (handleHit) {
         saveSnapshot();
@@ -213,7 +216,7 @@ function App(): React.JSX.Element {
         return;
       }
 
-      const world = mouseToWorld(e, canvas, camera.current);
+      const world = mouseToWorld(e, canvasRect, camera.current);
       const hit = hitTestCards(world.x, world.y, cards.current);
 
       if (!hit) {
@@ -239,18 +242,18 @@ function App(): React.JSX.Element {
         selectCard(hit.id);
       }
       saveSnapshot();
-      dragState.current = {
-        offsets: cards.current
-          .filter((c) => selectedCardIds.current.has(c.id))
-          .map((c) => ({ card: c, offsetX: world.x - c.x, offsetY: world.y - c.y })),
-      };
-      // Bring selected cards to front, preserving relative order
+      const offsets: DragState["offsets"] = [];
       const rest: Card[] = [];
       const selected: Card[] = [];
       for (const c of cards.current) {
-        if (selectedCardIds.current.has(c.id)) selected.push(c);
-        else rest.push(c);
+        if (selectedCardIds.current.has(c.id)) {
+          selected.push(c);
+          offsets.push({ card: c, offsetX: world.x - c.x, offsetY: world.y - c.y });
+        } else {
+          rest.push(c);
+        }
       }
+      dragState.current = { offsets };
       cards.current = [...rest, ...selected];
       scheduleRedraw();
       canvas.style.cursor = "grabbing";
@@ -260,7 +263,7 @@ function App(): React.JSX.Element {
       if (!canvas) return;
 
       if (resizeState.current) {
-        const { x: sx, y: sy } = mouseToScreen(e, canvas);
+        const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
         const rs = resizeState.current;
         const dx = (sx - rs.startMouseX) / camera.current.zoom;
         const dy = (sy - rs.startMouseY) / camera.current.zoom;
@@ -280,14 +283,14 @@ function App(): React.JSX.Element {
       }
 
       if (boxSelect.current) {
-        const world = mouseToWorld(e, canvas, camera.current);
+        const world = mouseToWorld(e, canvasRect, camera.current);
         boxSelect.current.current = world;
         scheduleRedraw();
         return;
       }
 
       if (dragState.current) {
-        const world = mouseToWorld(e, canvas, camera.current);
+        const world = mouseToWorld(e, canvasRect, camera.current);
         for (const entry of dragState.current.offsets) {
           entry.card.x = world.x - entry.offsetX;
           entry.card.y = world.y - entry.offsetY;
@@ -337,7 +340,7 @@ function App(): React.JSX.Element {
 
     function onDblClick(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
-      const world = mouseToWorld(e, canvas, camera.current);
+      const world = mouseToWorld(e, canvasRect, camera.current);
       const hit = hitTestCards(world.x, world.y, cards.current);
 
       if (hit) {
@@ -362,7 +365,7 @@ function App(): React.JSX.Element {
       const delta = -e.deltaY * ZOOM_SENSITIVITY;
       const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + delta)));
 
-      const { x: mx, y: my } = mouseToScreen(e, canvas);
+      const { x: mx, y: my } = mouseToScreen(e, canvasRect);
 
       camera.current.x += mx / newZoom - mx / zoom;
       camera.current.y += my / newZoom - my / zoom;
@@ -437,8 +440,8 @@ function App(): React.JSX.Element {
     resize();
     window.addEventListener("resize", resize);
     canvas.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+    window.addEventListener("mouseup", onMouseUp, { passive: true });
     canvas.addEventListener("dblclick", onDblClick);
     canvas.addEventListener("contextmenu", onContextMenu);
     canvas.addEventListener("wheel", onWheel, { passive: false });

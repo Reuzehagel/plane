@@ -19,13 +19,12 @@ export function worldToScreen(wx: number, wy: number, cam: Camera): Point {
   };
 }
 
-export function mouseToScreen(e: MouseEvent, canvas: HTMLCanvasElement): Point {
-  const rect = canvas.getBoundingClientRect();
+export function mouseToScreen(e: MouseEvent, rect: DOMRect): Point {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
-export function mouseToWorld(e: MouseEvent, canvas: HTMLCanvasElement, cam: Camera): Point {
-  const { x, y } = mouseToScreen(e, canvas);
+export function mouseToWorld(e: MouseEvent, rect: DOMRect, cam: Camera): Point {
+  const { x, y } = mouseToScreen(e, rect);
   return screenToWorld(x, y, cam);
 }
 
