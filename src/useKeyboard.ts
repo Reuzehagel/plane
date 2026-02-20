@@ -23,6 +23,7 @@ export interface KeyboardDeps {
   selectAllCards: () => void;
   applySnapshot: (s: Snapshot) => void;
   scheduleRedraw: () => void;
+  markDirty: () => void;
 }
 
 export function useKeyboard(deps: KeyboardDeps): void {
@@ -44,6 +45,7 @@ export function useKeyboard(deps: KeyboardDeps): void {
         d.saveSnapshot();
         d.deleteSelectedCards();
         d.scheduleRedraw();
+        d.markDirty();
         return;
       }
 
@@ -78,6 +80,7 @@ export function useKeyboard(deps: KeyboardDeps): void {
           }
         }
         d.scheduleRedraw();
+        d.markDirty();
         e.preventDefault();
       }
     }

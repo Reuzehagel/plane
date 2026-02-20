@@ -64,11 +64,14 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - Extracted modules (`menuHandlers.ts`, `useKeyboard.ts`) receive a `*Deps` interface — keeps them decoupled from App internals
 - For each React state that imperative event handlers need, a parallel ref mirrors it (e.g. `editingRef` ↔ `editing`, `contextMenuRef` ↔ `contextMenu`)
 - Double-click on a card opens editor; double-click on empty space creates a new card and opens editor
-- Middle-click always pans (in addition to left-click-drag on empty space)
+- Left-click on empty space starts box select (TLDraw/Excalidraw convention)
+- Middle-click and space+left-click pan the canvas (hand tool)
+- Space bar held = hand tool mode (cursor changes to grab)
 
 ### Selection
 - `selectedCardIds` is a `Set<string>` ref, not React state
-- Shift-click toggles individual card selection; shift-drag on empty space does box select
+- Left-click on empty space clears selection and starts box select; shift preserves existing selection
+- Shift-click toggles individual card selection
 - Cards are hit-tested back-to-front; selected cards are moved to end of array (top of z-order)
 
 ### Undo/Redo

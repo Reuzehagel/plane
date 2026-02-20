@@ -10,6 +10,7 @@ export interface Card {
   width: number;
   height: number;
   title: string;
+  color: string;
 }
 
 export interface Camera extends Point {
@@ -73,4 +74,17 @@ export interface ResizeTarget {
   y: number;
   w: number;
   h: number;
+}
+
+export interface Grid {
+  id: string;
+  name: string;
+  cards: Card[];
+  camera: Camera;
+}
+
+export interface GridSummary {
+  id: string;
+  name: string;
+  cardCount: number;
 }

@@ -10,13 +10,14 @@ export interface MenuHandlerDeps {
   findCard: (id: string) => Card | undefined;
   removeCard: (id: string) => void;
   deleteSelectedCards: () => void;
-  createCard: (x: number, y: number, w: number, h: number, title: string) => Card;
+  createCard: (x: number, y: number, w: number, h: number, title: string, color?: string) => Card;
   insertCard: (card: Card) => void;
   openEditor: (card: Card) => void;
   createAndStartEditingCardAt: (worldX: number, worldY: number) => void;
   saveSnapshot: () => void;
   setContextMenu: (v: ContextMenuState | null) => void;
   scheduleRedraw: () => void;
+  markDirty: () => void;
 }
 
 export interface MenuHandlers {
@@ -27,6 +28,7 @@ export interface MenuHandlers {
   handleMenuDelete: () => void;
   handleMenuPaste: () => void;
   handleMenuNewCard: () => void;
+  handleMenuChangeColor: (color: string) => void;
 }
 
 function getMenuCard(deps: MenuHandlerDeps): Card | undefined {
@@ -43,6 +45,7 @@ function runMenuAction(deps: MenuHandlerDeps, action: () => void): void {
   action();
   closeMenu(deps);
   deps.scheduleRedraw();
+  deps.markDirty();
 }
 
 export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
@@ -58,7 +61,7 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     if (!card) return;
     runMenuAction(deps, () => {
       const pos = snapPoint(card.x + DUPLICATE_OFFSET, card.y + DUPLICATE_OFFSET);
-      const clone = deps.createCard(pos.x, pos.y, card.width, card.height, card.title);
+      const clone = deps.createCard(pos.x, pos.y, card.width, card.height, card.title, card.color);
       deps.insertCard(clone);
     });
   }
@@ -97,7 +100,7 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     const src = deps.clipboard.current;
     runMenuAction(deps, () => {
       const pos = snapPoint(worldX - src.width / 2, worldY - src.height / 2);
-      const newCard = deps.createCard(pos.x, pos.y, src.width, src.height, src.title);
+      const newCard = deps.createCard(pos.x, pos.y, src.width, src.height, src.title, src.color);
       deps.insertCard(newCard);
     });
   }
@@ -109,6 +112,14 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     deps.createAndStartEditingCardAt(worldX, worldY);
   }
 
+  function handleMenuChangeColor(color: string): void {
+    const card = getMenuCard(deps);
+    if (!card) return;
+    runMenuAction(deps, () => {
+      card.color = color;
+    });
+  }
+
   return {
     handleMenuEdit,
     handleMenuDuplicate,
@@ -117,5 +128,6 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     handleMenuDelete,
     handleMenuPaste,
     handleMenuNewCard,
+    handleMenuChangeColor,
   };
 }

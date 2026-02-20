@@ -2,9 +2,10 @@ import type { BoxSelectState, Camera, Card } from "./types";
 import { worldToScreen, getCardCorners } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
-  CARD_RADIUS, CARD_BG, CARD_BORDER, CARD_TEXT,
+  CARD_RADIUS, CARD_BG, CARD_BORDER,
   CARD_SHADOW, CARD_SELECTED_BORDER, HANDLE_SIZE,
-  CARD_FONT_SIZE, CARD_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
+  CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
+  CARD_ACCENT_HEIGHT,
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
 } from "./constants";
 
@@ -79,6 +80,7 @@ export function drawScene(
 
   const sr = CARD_RADIUS * zoom;
   const selectedRects: ScreenRect[] = [];
+  const accentH = CARD_ACCENT_HEIGHT * zoom;
 
   for (const card of cards) {
     const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera);
@@ -94,10 +96,17 @@ export function drawScene(
     // Fill with shadow
     ctx.save();
     ctx.shadowColor = CARD_SHADOW;
-    ctx.shadowBlur = 12 * zoom;
+    ctx.shadowBlur = 8 * zoom;
     ctx.shadowOffsetY = 2 * zoom;
     ctx.fillStyle = CARD_BG;
     ctx.fill(path);
+    ctx.restore();
+
+    // Accent bar at top (clipped to card shape)
+    ctx.save();
+    ctx.clip(path);
+    ctx.fillStyle = card.color;
+    ctx.fillRect(sx, sy, sw, accentH);
     ctx.restore();
 
     // Border
@@ -115,10 +124,10 @@ export function drawScene(
       ctx.save();
       const clipPath = roundRectPath(sx + CARD_TEXT_CLIP_PAD * zoom, sy, sw - CARD_TEXT_CLIP_PAD * 2 * zoom, sh, sr);
       ctx.clip(clipPath);
-      ctx.fillStyle = CARD_TEXT;
-      ctx.font = `${CARD_FONT_SIZE * zoom}px ${CARD_FONT}`;
+      ctx.fillStyle = card.color;
+      ctx.font = `${CARD_FONT_SIZE * zoom}px ${CARD_TITLE_FONT}`;
       ctx.textBaseline = "middle";
-      ctx.fillText(card.title, sx + CARD_TEXT_PAD * zoom, sy + sh / 2);
+      ctx.fillText(card.title.toUpperCase(), sx + CARD_TEXT_PAD * zoom, sy + sh / 2);
       ctx.restore();
     }
   }

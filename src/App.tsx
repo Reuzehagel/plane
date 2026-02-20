@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
+import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, HandleCorner, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
 import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen, snapToGrid, snapPoint, lerpSnap } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot } from "./history";
@@ -8,10 +8,12 @@ import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
-  CARD_FONT_SIZE, CARD_TEXT_PAD,
+  CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS,
 } from "./constants";
 import { useKeyboard } from "./useKeyboard";
 import { createMenuHandlers } from "./menuHandlers";
+import { loadWorkspace, saveWorkspace } from "./persistence";
+import { Sidebar } from "./Sidebar";
 
 // Pairs useState with a ref that stays in sync, so imperative event handlers
 // can always read the latest value without stale closures.
@@ -46,6 +48,7 @@ function App(): React.JSX.Element {
   const dragRafId = useRef<number>(0);
   const resizeTarget = useRef<ResizeTarget | null>(null);
   const resizeRafId = useRef<number>(0);
+  const spaceHeld = useRef(false);
 
   const history = useRef<History>({ undoStack: [], redoStack: [] });
 
@@ -54,6 +57,30 @@ function App(): React.JSX.Element {
   const clipboard = useRef<Card | null>(null);
 
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const isLoaded = useRef(false);
+  const saveTimerId = useRef<number>(0);
+
+  const grids = useRef<Grid[]>([]);
+  const [activeGridId, activeGridIdRef, setActiveGridId] = useRefState<string>("");
+  const [gridSummaries, setGridSummaries] = useState<GridSummary[]>([]);
+  const colorIndex = useRef(0);
+  const [fontsReady, setFontsReady] = useState(false);
+
+  function refreshGridSummaries(): void {
+    setGridSummaries(grids.current.map((g) => ({
+      id: g.id,
+      name: g.name,
+      cardCount: g.cards.length,
+    })));
+  }
+
+  function syncCurrentGridBack(): void {
+    const grid = grids.current.find((g) => g.id === activeGridIdRef.current);
+    if (grid) {
+      grid.cards = cards.current;
+      grid.camera = { ...camera.current };
+    }
+  }
 
   const draw = useCallback((): void => {
     const canvas = canvasRef.current;
@@ -69,6 +96,36 @@ function App(): React.JSX.Element {
     rafId.current = requestAnimationFrame(draw);
   }, [draw]);
 
+  useEffect(() => {
+    document.fonts.ready.then(() => setFontsReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!fontsReady) return;
+
+    loadWorkspace().then((data) => {
+      grids.current = data.grids;
+      setActiveGridId(data.activeGridId);
+
+      const activeGrid = data.grids.find((g) => g.id === data.activeGridId) ?? data.grids[0];
+      cards.current = activeGrid.cards;
+      camera.current = { ...activeGrid.camera };
+      isLoaded.current = true;
+      refreshGridSummaries();
+      scheduleRedraw();
+    });
+
+    function onBeforeUnload(): void {
+      syncCurrentGridBack();
+      saveWorkspace(grids.current, activeGridIdRef.current);
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.clearTimeout(saveTimerId.current);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [fontsReady, scheduleRedraw]);
+
   function saveSnapshot(): void {
     pushSnapshot(history.current, cards.current, selectedCardIds.current);
   }
@@ -77,6 +134,17 @@ function App(): React.JSX.Element {
     cards.current = snapshot.cards;
     selectedCardIds.current = snapshot.selectedCardIds;
     scheduleRedraw();
+    markDirty();
+  }
+
+  function markDirty(): void {
+    if (!isLoaded.current) return;
+    window.clearTimeout(saveTimerId.current);
+    saveTimerId.current = window.setTimeout(() => {
+      syncCurrentGridBack();
+      refreshGridSummaries();
+      saveWorkspace(grids.current, activeGridIdRef.current);
+    }, 2000);
   }
 
   function removeCard(cardId: string): void {
@@ -84,8 +152,10 @@ function App(): React.JSX.Element {
     selectedCardIds.current.delete(cardId);
   }
 
-  function createCard(x: number, y: number, width: number, height: number, title: string): Card {
-    return { id: crypto.randomUUID(), x, y, width, height, title };
+  function createCard(x: number, y: number, width: number, height: number, title: string, color?: string): Card {
+    const c = color ?? CARD_COLORS[colorIndex.current % CARD_COLORS.length];
+    if (!color) colorIndex.current++;
+    return { id: crypto.randomUUID(), x, y, width, height, title, color: c };
   }
 
   function insertCard(card: Card): void {
@@ -129,7 +199,54 @@ function App(): React.JSX.Element {
     saveSnapshot();
     insertCard(newCard);
     scheduleRedraw();
+    markDirty();
     requestAnimationFrame(() => openEditor(newCard));
+  }
+
+  function activateGrid(grid: Grid): void {
+    cards.current = grid.cards;
+    camera.current = { ...grid.camera };
+    selectedCardIds.current.clear();
+    history.current = { undoStack: [], redoStack: [] };
+    setActiveGridId(grid.id);
+    refreshGridSummaries();
+    scheduleRedraw();
+    markDirty();
+  }
+
+  function switchGrid(id: string): void {
+    if (id === activeGridIdRef.current) return;
+    syncCurrentGridBack();
+    const grid = grids.current.find((g) => g.id === id);
+    if (grid) activateGrid(grid);
+  }
+
+  function createGrid(): void {
+    syncCurrentGridBack();
+    const name = `Grid ${grids.current.length + 1}`;
+    const grid: Grid = { id: crypto.randomUUID(), name, cards: [], camera: { x: 0, y: 0, zoom: 1 } };
+    grids.current.push(grid);
+    activateGrid(grid);
+  }
+
+  function deleteGrid(id: string): void {
+    if (grids.current.length <= 1) return;
+    grids.current = grids.current.filter((g) => g.id !== id);
+    if (activeGridIdRef.current === id) {
+      activateGrid(grids.current[0]);
+    } else {
+      refreshGridSummaries();
+      markDirty();
+    }
+  }
+
+  function renameGrid(id: string, name: string): void {
+    const grid = grids.current.find((g) => g.id === id);
+    if (grid) {
+      grid.name = name;
+      refreshGridSummaries();
+      markDirty();
+    }
   }
 
   useEffect(() => {
@@ -189,15 +306,17 @@ function App(): React.JSX.Element {
         canvas.style.cursor = "grabbing";
         return;
       }
+      if (spaceHeld.current) {
+        canvas.style.cursor = "grab";
+        return;
+      }
       const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
       const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
       if (handleHit) {
         canvas.style.cursor = handleCursor(handleHit.handle);
         return;
       }
-      const world = mouseToWorld(e, canvasRect, camera.current);
-      const hit = hitTestCards(world.x, world.y, cards.current);
-      canvas.style.cursor = hit ? "default" : "grab";
+      canvas.style.cursor = "default";
     }
 
     function onContextMenu(e: MouseEvent): void {
@@ -244,6 +363,12 @@ function App(): React.JSX.Element {
 
       if (e.button !== 0) return;
 
+      // Space+left-click pans (hand tool), regardless of what's under cursor
+      if (spaceHeld.current) {
+        startPanning(e);
+        return;
+      }
+
       const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
       const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
       if (handleHit) {
@@ -267,13 +392,9 @@ function App(): React.JSX.Element {
       const hit = hitTestCards(world.x, world.y, cards.current);
 
       if (!hit) {
-        if (e.shiftKey) {
-          boxSelect.current = { start: world, current: world };
-        } else {
-          selectedCardIds.current.clear();
-          startPanning(e);
-          scheduleRedraw();
-        }
+        if (!e.shiftKey) selectedCardIds.current.clear();
+        boxSelect.current = { start: world, current: world };
+        scheduleRedraw();
         return;
       }
 
@@ -401,10 +522,15 @@ function App(): React.JSX.Element {
         }
         scheduleRedraw();
       }
+      const wasMutating = !!(resizeState.current || dragState.current || isPanning.current);
       resizeState.current = null;
       dragState.current = null;
       isPanning.current = false;
+      if (canvas) {
+        canvas.style.cursor = spaceHeld.current ? "grab" : "default";
+      }
       updateCursor(e);
+      if (wasMutating) markDirty();
     }
 
     function onDblClick(e: MouseEvent): void {
@@ -436,6 +562,22 @@ function App(): React.JSX.Element {
       camera.current.zoom = newZoom;
 
       scheduleRedraw();
+      markDirty();
+    }
+
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.code === "Space" && !editingRef.current) {
+        spaceHeld.current = true;
+        if (canvas && !isPanning.current) canvas.style.cursor = "grab";
+        e.preventDefault();
+      }
+    }
+
+    function onKeyUp(e: KeyboardEvent): void {
+      if (e.code === "Space") {
+        spaceHeld.current = false;
+        if (canvas && !isPanning.current) canvas.style.cursor = "default";
+      }
     }
 
     resize();
@@ -446,6 +588,8 @@ function App(): React.JSX.Element {
     canvas.addEventListener("dblclick", onDblClick);
     canvas.addEventListener("contextmenu", onContextMenu);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
 
     return () => {
       window.removeEventListener("resize", resize);
@@ -455,6 +599,8 @@ function App(): React.JSX.Element {
       canvas.removeEventListener("dblclick", onDblClick);
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       cancelAnimationFrame(rafId.current);
       cancelAnimationFrame(dragRafId.current);
       cancelAnimationFrame(resizeRafId.current);
@@ -475,6 +621,7 @@ function App(): React.JSX.Element {
     }
     setEditing(null);
     scheduleRedraw();
+    markDirty();
   }
 
   function cancelEdit(): void {
@@ -484,6 +631,7 @@ function App(): React.JSX.Element {
       saveSnapshot();
       removeCard(editing.cardId);
       scheduleRedraw();
+      markDirty();
     }
     setEditing(null);
   }
@@ -491,21 +639,32 @@ function App(): React.JSX.Element {
   useKeyboard({
     contextMenuRef, editingRef, selectedCardIds, cards, history,
     setContextMenu, saveSnapshot, deleteSelectedCards,
-    selectAllCards, applySnapshot, scheduleRedraw,
+    selectAllCards, applySnapshot, scheduleRedraw, markDirty,
   });
 
   const {
     handleMenuEdit, handleMenuDuplicate, handleMenuCopy,
     handleMenuResetSize, handleMenuDelete, handleMenuPaste, handleMenuNewCard,
+    handleMenuChangeColor,
   } = createMenuHandlers({
     contextMenu, selectedCardIds, clipboard,
     findCard, removeCard, deleteSelectedCards, createCard, insertCard, openEditor,
     createAndStartEditingCardAt,
-    saveSnapshot, setContextMenu, scheduleRedraw,
+    saveSnapshot, setContextMenu, scheduleRedraw, markDirty,
   });
+
+  const editingCard = editing ? findCard(editing.cardId) : null;
 
   return (
     <>
+      <Sidebar
+        grids={gridSummaries}
+        activeGridId={activeGridId}
+        onSwitchGrid={switchGrid}
+        onCreateGrid={createGrid}
+        onDeleteGrid={deleteGrid}
+        onRenameGrid={renameGrid}
+      />
       <canvas ref={canvasRef} />
       {editing && (
         <input
@@ -518,6 +677,7 @@ function App(): React.JSX.Element {
             fontSize: CARD_FONT_SIZE * camera.current.zoom,
             borderRadius: CARD_RADIUS * camera.current.zoom,
             padding: `0 ${CARD_TEXT_PAD * camera.current.zoom}px`,
+            color: editingCard?.color,
           }}
           autoFocus
           defaultValue={findCard(editing.cardId)?.title ?? ""}
@@ -542,6 +702,17 @@ function App(): React.JSX.Element {
               <div className="context-menu-item" onClick={handleMenuDuplicate}>Duplicate</div>
               <div className="context-menu-item" onClick={handleMenuCopy}>Copy</div>
               <div className="context-menu-item" onClick={handleMenuResetSize}>Reset Size</div>
+              <div className="context-menu-separator" />
+              <div className="context-menu-colors">
+                {CARD_COLORS.map((color) => (
+                  <div
+                    key={color}
+                    className={`context-menu-color-dot${findCard(contextMenu.cardId!)?.color === color ? " active" : ""}`}
+                    style={{ background: color }}
+                    onClick={() => handleMenuChangeColor(color)}
+                  />
+                ))}
+              </div>
               <div className="context-menu-separator" />
               <div className="context-menu-item" onClick={handleMenuDelete}>Delete</div>
             </>
