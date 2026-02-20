@@ -3,7 +3,7 @@ import { worldToScreen } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
   CARD_RADIUS, CARD_BG, CARD_BORDER, CARD_TEXT,
-  CARD_SHADOW, CARD_SELECTED_BORDER,
+  CARD_SHADOW, CARD_SELECTED_BORDER, HANDLE_SIZE,
 } from "./constants";
 
 export function drawRoundRect(
@@ -107,6 +107,28 @@ export function drawScene(
       ctx.textBaseline = "middle";
       ctx.fillText(card.title, sx + 10 * zoom, sy + sh / 2);
       ctx.restore();
+    }
+  }
+
+  // Draw handles on top of all cards
+  for (const card of cards) {
+    if (!selectedCardIds.has(card.id)) continue;
+    const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera);
+    const sw = card.width * zoom;
+    const sh = card.height * zoom;
+    const hs = HANDLE_SIZE;
+    const corners: [number, number][] = [
+      [sx, sy],
+      [sx + sw, sy],
+      [sx, sy + sh],
+      [sx + sw, sy + sh],
+    ];
+    for (const [cx, cy] of corners) {
+      ctx.fillStyle = CARD_SELECTED_BORDER;
+      ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx - hs / 2, cy - hs / 2, hs, hs);
     }
   }
 

@@ -14,8 +14,8 @@
 - [x] Multi-select (box select, shift-click)
 - [x] Move selected group together
 - [x] Keyboard shortcuts (Delete, Ctrl+A)
-- [ ] Undo/redo (Ctrl+Z / Ctrl+Shift+Z)
-- [ ] Arrow nudge for selected cards
+- [x] Undo/redo (Ctrl+Z / Ctrl+Shift+Z)
+- [x] Arrow nudge for selected cards
 
 ## Cards
 

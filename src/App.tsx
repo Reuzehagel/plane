@@ -1,12 +1,13 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, DragState, EditingState, History, Point, Snapshot } from "./types";
-import { mouseToWorld, hitTestCards, worldToScreen } from "./geometry";
+import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, Snapshot } from "./types";
+import { mouseToWorld, hitTestCards, hitTestHandles, worldToScreen } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot, undo, redo } from "./history";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS, NUDGE_AMOUNT,
+  CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
 } from "./constants";
 
 function App(): React.JSX.Element {
@@ -18,6 +19,7 @@ function App(): React.JSX.Element {
 
   const cards = useRef<Card[]>([]);
   const dragState = useRef<DragState | null>(null);
+  const resizeState = useRef<ResizeState | null>(null);
   const selectedCardIds = useRef<Set<string>>(new Set());
   const boxSelect = useRef<BoxSelectState | null>(null);
 
@@ -25,6 +27,10 @@ function App(): React.JSX.Element {
 
   const [editing, setEditing] = useState<EditingState | null>(null);
   const editingRef = useRef<EditingState | null>(null);
+
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuRef = useRef<ContextMenuState | null>(null);
+  const clipboard = useRef<Card | null>(null);
 
   const draw = useCallback((): void => {
     const canvas = canvasRef.current;
@@ -52,10 +58,18 @@ function App(): React.JSX.Element {
     selectedCardIds.current.delete(cardId);
   }
 
-  // Keep editingRef in sync with state so imperative event handlers can read it
+  // Keep refs in sync with state so imperative event handlers can read them
   useEffect(() => {
     editingRef.current = editing;
   }, [editing]);
+
+  useEffect(() => {
+    contextMenuRef.current = contextMenu;
+  }, [contextMenu]);
+
+  function closeContextMenu(): void {
+    setContextMenu(null);
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -71,10 +85,26 @@ function App(): React.JSX.Element {
       scheduleRedraw();
     }
 
+    function handleCursor(handle: HandleCorner): string {
+      return handle === "nw" || handle === "se" ? "nwse-resize" : "nesw-resize";
+    }
+
     function updateCursor(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
+      if (resizeState.current) {
+        canvas.style.cursor = handleCursor(resizeState.current.handle);
+        return;
+      }
       if (dragState.current || isPanning.current) {
         canvas.style.cursor = "grabbing";
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
+      if (handleHit) {
+        canvas.style.cursor = handleCursor(handleHit.handle);
         return;
       }
       const world = mouseToWorld(e, canvas, camera.current);
@@ -82,8 +112,34 @@ function App(): React.JSX.Element {
       canvas.style.cursor = hit ? "default" : "grab";
     }
 
+    function onContextMenu(e: MouseEvent): void {
+      e.preventDefault();
+      if (!canvas || editingRef.current) return;
+      const world = mouseToWorld(e, canvas, camera.current);
+      const hit = hitTestCards(world.x, world.y, cards.current);
+
+      if (hit && !selectedCardIds.current.has(hit.id)) {
+        selectedCardIds.current.clear();
+        selectedCardIds.current.add(hit.id);
+        scheduleRedraw();
+      }
+
+      setContextMenu({
+        screenX: e.clientX,
+        screenY: e.clientY,
+        worldX: world.x,
+        worldY: world.y,
+        cardId: hit ? hit.id : null,
+      });
+    }
+
     function onMouseDown(e: MouseEvent): void {
       if (!canvas || editingRef.current) return;
+
+      if (contextMenuRef.current) {
+        setContextMenu(null);
+        return;
+      }
 
       // Middle-click always pans
       if (e.button === 1) {
@@ -95,6 +151,27 @@ function App(): React.JSX.Element {
       }
 
       if (e.button === 0) {
+        // Check handle hit before card hit
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const handleHit = hitTestHandles(sx, sy, cards.current, selectedCardIds.current, camera.current);
+        if (handleHit) {
+          saveSnapshot();
+          resizeState.current = {
+            card: handleHit.card,
+            handle: handleHit.handle,
+            startMouseX: sx,
+            startMouseY: sy,
+            startX: handleHit.card.x,
+            startY: handleHit.card.y,
+            startWidth: handleHit.card.width,
+            startHeight: handleHit.card.height,
+          };
+          canvas.style.cursor = handleCursor(handleHit.handle);
+          return;
+        }
+
         const world = mouseToWorld(e, canvas, camera.current);
         const hit = hitTestCards(world.x, world.y, cards.current);
         if (hit) {
@@ -141,6 +218,54 @@ function App(): React.JSX.Element {
 
     function onMouseMove(e: MouseEvent): void {
       if (!canvas) return;
+
+      if (resizeState.current) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const rs = resizeState.current;
+        const dx = (sx - rs.startMouseX) / camera.current.zoom;
+        const dy = (sy - rs.startMouseY) / camera.current.zoom;
+
+        let newX = rs.startX;
+        let newY = rs.startY;
+        let newW = rs.startWidth;
+        let newH = rs.startHeight;
+
+        if (rs.handle === "se") {
+          newW = rs.startWidth + dx;
+          newH = rs.startHeight + dy;
+        } else if (rs.handle === "sw") {
+          newW = rs.startWidth - dx;
+          newH = rs.startHeight + dy;
+          newX = rs.startX + dx;
+        } else if (rs.handle === "ne") {
+          newW = rs.startWidth + dx;
+          newH = rs.startHeight - dy;
+          newY = rs.startY + dy;
+        } else if (rs.handle === "nw") {
+          newW = rs.startWidth - dx;
+          newH = rs.startHeight - dy;
+          newX = rs.startX + dx;
+          newY = rs.startY + dy;
+        }
+
+        // Clamp and fix position for corners that move origin
+        const clampedW = Math.max(CARD_MIN_WIDTH, Math.min(CARD_MAX_WIDTH, newW));
+        const clampedH = Math.max(CARD_MIN_HEIGHT, Math.min(CARD_MAX_HEIGHT, newH));
+
+        if (rs.handle === "sw" || rs.handle === "nw") {
+          rs.card.x = newX + (newW - clampedW);
+        }
+        if (rs.handle === "ne" || rs.handle === "nw") {
+          rs.card.y = newY + (newH - clampedH);
+        }
+
+        rs.card.width = clampedW;
+        rs.card.height = clampedH;
+        scheduleRedraw();
+        return;
+      }
 
       if (boxSelect.current) {
         const world = mouseToWorld(e, canvas, camera.current);
@@ -192,6 +317,7 @@ function App(): React.JSX.Element {
         boxSelect.current = null;
         scheduleRedraw();
       }
+      resizeState.current = null;
       dragState.current = null;
       isPanning.current = false;
       updateCursor(e);
@@ -237,6 +363,7 @@ function App(): React.JSX.Element {
     function onWheel(e: WheelEvent): void {
       if (!canvas || editingRef.current) return;
       e.preventDefault();
+      if (contextMenuRef.current) setContextMenu(null);
 
       const { zoom } = camera.current;
       const delta = -e.deltaY * ZOOM_SENSITIVITY;
@@ -264,6 +391,10 @@ function App(): React.JSX.Element {
     }
 
     function onKeyDown(e: KeyboardEvent): void {
+      if (contextMenuRef.current) {
+        if (e.key === "Escape") setContextMenu(null);
+        return;
+      }
       if (editingRef.current) return;
 
       const mod = e.ctrlKey || e.metaKey;
@@ -318,6 +449,7 @@ function App(): React.JSX.Element {
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("dblclick", onDblClick);
+    canvas.addEventListener("contextmenu", onContextMenu);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("keydown", onKeyDown);
 
@@ -327,6 +459,7 @@ function App(): React.JSX.Element {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("dblclick", onDblClick);
+      canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
       cancelAnimationFrame(rafId.current);
@@ -358,6 +491,128 @@ function App(): React.JSX.Element {
     setEditing(null);
   }
 
+  function handleMenuEdit(): void {
+    if (!contextMenu?.cardId) return;
+    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    if (!card) return;
+    const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
+    const zoom = camera.current.zoom;
+    closeContextMenu();
+    setEditing({
+      cardId: card.id,
+      screenX: sx,
+      screenY: sy,
+      screenWidth: card.width * zoom,
+      screenHeight: card.height * zoom,
+    });
+  }
+
+  function handleMenuDuplicate(): void {
+    if (!contextMenu?.cardId) return;
+    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    if (!card) return;
+    saveSnapshot();
+    const clone: Card = {
+      id: crypto.randomUUID(),
+      x: card.x + 20,
+      y: card.y + 20,
+      width: card.width,
+      height: card.height,
+      title: card.title,
+    };
+    cards.current.push(clone);
+    selectedCardIds.current.clear();
+    selectedCardIds.current.add(clone.id);
+    closeContextMenu();
+    scheduleRedraw();
+  }
+
+  function handleMenuCopy(): void {
+    if (!contextMenu?.cardId) return;
+    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    if (!card) return;
+    clipboard.current = { ...card };
+    closeContextMenu();
+  }
+
+  function handleMenuResetSize(): void {
+    if (!contextMenu?.cardId) return;
+    const card = cards.current.find((c) => c.id === contextMenu.cardId);
+    if (!card) return;
+    saveSnapshot();
+    card.width = CARD_WIDTH;
+    card.height = CARD_HEIGHT;
+    closeContextMenu();
+    scheduleRedraw();
+  }
+
+  function handleMenuDelete(): void {
+    if (!contextMenu?.cardId) return;
+    saveSnapshot();
+    if (selectedCardIds.current.has(contextMenu.cardId)) {
+      for (const id of selectedCardIds.current) {
+        removeCard(id);
+      }
+    } else {
+      removeCard(contextMenu.cardId);
+    }
+    closeContextMenu();
+    scheduleRedraw();
+  }
+
+  function handleMenuPaste(): void {
+    if (!contextMenu || !clipboard.current) return;
+    saveSnapshot();
+    const src = clipboard.current;
+    const newCard: Card = {
+      id: crypto.randomUUID(),
+      x: contextMenu.worldX - src.width / 2,
+      y: contextMenu.worldY - src.height / 2,
+      width: src.width,
+      height: src.height,
+      title: src.title,
+    };
+    cards.current.push(newCard);
+    selectedCardIds.current.clear();
+    selectedCardIds.current.add(newCard.id);
+    closeContextMenu();
+    scheduleRedraw();
+  }
+
+  function handleMenuNewCard(): void {
+    if (!contextMenu) return;
+    saveSnapshot();
+    const newCard: Card = {
+      id: crypto.randomUUID(),
+      x: contextMenu.worldX - CARD_WIDTH / 2,
+      y: contextMenu.worldY - CARD_HEIGHT / 2,
+      width: CARD_WIDTH,
+      height: CARD_HEIGHT,
+      title: "",
+    };
+    cards.current.push(newCard);
+    selectedCardIds.current.clear();
+    selectedCardIds.current.add(newCard.id);
+    const { worldX, worldY } = contextMenu;
+    closeContextMenu();
+    scheduleRedraw();
+    requestAnimationFrame(() => {
+      const { x: sx, y: sy } = worldToScreen(
+        worldX - CARD_WIDTH / 2,
+        worldY - CARD_HEIGHT / 2,
+        camera.current,
+      );
+      const zoom = camera.current.zoom;
+      setEditing({
+        cardId: newCard.id,
+        screenX: sx,
+        screenY: sy,
+        screenWidth: CARD_WIDTH * zoom,
+        screenHeight: CARD_HEIGHT * zoom,
+      });
+    });
+  }
+
   return (
     <>
       <canvas ref={canvasRef} />
@@ -386,6 +641,33 @@ function App(): React.JSX.Element {
           }}
           onBlur={(e) => commitEdit(e.currentTarget.value)}
         />
+      )}
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.screenX, top: contextMenu.screenY }}
+        >
+          {contextMenu.cardId ? (
+            <>
+              <div className="context-menu-item" onClick={handleMenuEdit}>Edit</div>
+              <div className="context-menu-item" onClick={handleMenuDuplicate}>Duplicate</div>
+              <div className="context-menu-item" onClick={handleMenuCopy}>Copy</div>
+              <div className="context-menu-item" onClick={handleMenuResetSize}>Reset Size</div>
+              <div className="context-menu-separator" />
+              <div className="context-menu-item" onClick={handleMenuDelete}>Delete</div>
+            </>
+          ) : (
+            <>
+              <div
+                className={`context-menu-item${clipboard.current ? "" : " disabled"}`}
+                onClick={handleMenuPaste}
+              >
+                Paste
+              </div>
+              <div className="context-menu-item" onClick={handleMenuNewCard}>New Card</div>
+            </>
+          )}
+        </div>
       )}
     </>
   );

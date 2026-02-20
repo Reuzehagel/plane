@@ -32,7 +32,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Modules
 - `src/main.tsx` — React entry point
 - `src/App.tsx` — Canvas app: event handling, editing overlay, all interaction logic
-- `src/types.ts` — Shared interfaces (Card, Camera, DragState, EditingState, Snapshot, History)
+- `src/types.ts` — Shared interfaces (Card, Camera, DragState, EditingState, ContextMenuState, ResizeState, Snapshot, History)
 - `src/constants.ts` — Visual and behavior constants
 - `src/geometry.ts` — Coordinate conversion (screenToWorld, worldToScreen, mouseToWorld, hitTestCards)
 - `src/rendering.ts` — Canvas 2D draw functions (drawScene, drawRoundRect)
@@ -41,7 +41,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Rendering Pipeline
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
 - `scheduleRedraw()` must be called after every ref mutation that affects visuals — it debounces via `requestAnimationFrame`
-- The only React-rendered DOM element is the `<input>` overlay for card title editing, positioned absolutely to match the card's screen coordinates
+- React-rendered DOM overlays (card editor `<input>`, context menu `<div>`) are positioned absolutely over the canvas at screen coordinates
 
 ### Coordinate System
 - **World space**: where cards live (card.x, card.y)
@@ -51,7 +51,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 
 ### Event Handling
 - All canvas interaction (mouse, keyboard) is handled via native event listeners in a single `useEffect`, not React event props
-- `editingRef` mirrors the `editing` state so imperative handlers can read it without stale closures
+- For each React state that imperative event handlers need, a parallel ref mirrors it (e.g. `editingRef` ↔ `editing`, `contextMenuRef` ↔ `contextMenu`)
 
 ### Selection
 - `selectedCardIds` is a `Set<string>` ref, not React state
@@ -63,3 +63,9 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - `saveSnapshot()` before mutating state; one snapshot per user action (drag captures at mousedown, not per frame)
 - `removeCard()` is a low-level helper — callers push snapshots, not `removeCard` itself
 - Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; arrow keys nudge selected cards by `NUDGE_AMOUNT` px
+
+### Context Menu
+- Right-click opens a context menu (DOM overlay, same pattern as card editor)
+- Card menu: Edit, Duplicate, Copy, Reset Size, Delete; empty-space menu: Paste, New Card
+- Internal clipboard ref (`Card | null`) — not system clipboard
+- Menu closes on: left-click, Escape, scroll/zoom

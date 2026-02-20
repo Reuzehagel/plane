@@ -50,3 +50,24 @@ export interface History {
   undoStack: Snapshot[];
   redoStack: Snapshot[];
 }
+
+export interface ContextMenuState {
+  screenX: number;
+  screenY: number;
+  worldX: number;
+  worldY: number;
+  cardId: string | null;
+}
+
+export type HandleCorner = "nw" | "ne" | "sw" | "se";
+
+export interface ResizeState {
+  card: Card;
+  handle: HandleCorner;
+  startMouseX: number;
+  startMouseY: number;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+}

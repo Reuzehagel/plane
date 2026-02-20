@@ -1,4 +1,5 @@
-import type { Camera, Card, Point } from "./types";
+import type { Camera, Card, HandleCorner, Point } from "./types";
+import { HANDLE_HIT_SIZE } from "./constants";
 
 export function screenToWorld(sx: number, sy: number, cam: Camera): Point {
   return {
@@ -24,6 +25,38 @@ export function hitTestCards(wx: number, wy: number, cards: Card[]): Card | null
     const c = cards[i];
     if (wx >= c.x && wx <= c.x + c.width && wy >= c.y && wy <= c.y + c.height) {
       return c;
+    }
+  }
+  return null;
+}
+
+export function hitTestHandles(
+  screenX: number,
+  screenY: number,
+  cards: Card[],
+  selectedCardIds: Set<string>,
+  cam: Camera,
+): { card: Card; handle: HandleCorner } | null {
+  const half = HANDLE_HIT_SIZE / 2;
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const card = cards[i];
+    if (!selectedCardIds.has(card.id)) continue;
+    const { x: sx, y: sy } = worldToScreen(card.x, card.y, cam);
+    const sw = card.width * cam.zoom;
+    const sh = card.height * cam.zoom;
+    const corners: [number, number, HandleCorner][] = [
+      [sx, sy, "nw"],
+      [sx + sw, sy, "ne"],
+      [sx, sy + sh, "sw"],
+      [sx + sw, sy + sh, "se"],
+    ];
+    for (const [cx, cy, handle] of corners) {
+      if (
+        screenX >= cx - half && screenX <= cx + half &&
+        screenY >= cy - half && screenY <= cy + half
+      ) {
+        return { card, handle };
+      }
     }
   }
   return null;

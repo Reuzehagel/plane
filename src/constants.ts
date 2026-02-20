@@ -15,3 +15,10 @@ export const CARD_SHADOW = "rgba(0, 0, 0, 0.4)";
 export const CARD_SELECTED_BORDER = "#7a7aff";
 
 export const NUDGE_AMOUNT = 10;
+
+export const HANDLE_SIZE = 8;
+export const HANDLE_HIT_SIZE = 14;
+export const CARD_MIN_WIDTH = 60;
+export const CARD_MIN_HEIGHT = 32;
+export const CARD_MAX_WIDTH = 800;
+export const CARD_MAX_HEIGHT = 600;
