@@ -16,6 +16,7 @@ const CARD_BG = "#23233a";
 const CARD_BORDER = "#3a3a5c";
 const CARD_TEXT = "#e0e0e0";
 const CARD_SHADOW = "rgba(0, 0, 0, 0.4)";
+const CARD_SELECTED_BORDER = "#7a7aff";
 
 function screenToWorld(sx: number, sy: number, cam: Camera): Point {
   return {
@@ -77,6 +78,7 @@ function App(): React.JSX.Element {
 
   const cards = useRef<Card[]>([]);
   const draggingCard = useRef<DragState | null>(null);
+  const selectedCardId = useRef<string | null>(null);
 
   const [editing, setEditing] = useState<EditingState | null>(null);
   const editingRef = useRef<EditingState | null>(null);
@@ -131,7 +133,6 @@ function App(): React.JSX.Element {
       drawRoundRect(ctx, sx, sy, sw, sh, sr);
       ctx.fill();
 
-      // Reset shadow before drawing border and text
       ctx.shadowColor = "transparent";
       ctx.shadowBlur = 0;
       ctx.shadowOffsetX = 0;
@@ -141,6 +142,13 @@ function App(): React.JSX.Element {
       ctx.lineWidth = 1;
       drawRoundRect(ctx, sx, sy, sw, sh, sr);
       ctx.stroke();
+
+      if (card.id === selectedCardId.current) {
+        ctx.strokeStyle = CARD_SELECTED_BORDER;
+        ctx.lineWidth = 2;
+        drawRoundRect(ctx, sx, sy, sw, sh, sr);
+        ctx.stroke();
+      }
 
       if (card.title) {
         ctx.save();
@@ -161,6 +169,13 @@ function App(): React.JSX.Element {
     cancelAnimationFrame(rafId.current);
     rafId.current = requestAnimationFrame(draw);
   }, [draw]);
+
+  function removeCard(cardId: string): void {
+    cards.current = cards.current.filter((c) => c.id !== cardId);
+    if (selectedCardId.current === cardId) {
+      selectedCardId.current = null;
+    }
+  }
 
   // Keep editingRef in sync with state so imperative event handlers can read it
   useEffect(() => {
@@ -208,6 +223,7 @@ function App(): React.JSX.Element {
       if (e.button === 0) {
         const hit = hitTestCards(world.x, world.y, cards.current);
         if (hit) {
+          selectedCardId.current = hit.id;
           draggingCard.current = {
             card: hit,
             offsetX: world.x - hit.x,
@@ -218,13 +234,15 @@ function App(): React.JSX.Element {
           if (idx !== -1 && idx !== cards.current.length - 1) {
             cards.current.splice(idx, 1);
             cards.current.push(hit);
-            scheduleRedraw();
           }
+          scheduleRedraw();
           canvas.style.cursor = "grabbing";
         } else {
+          selectedCardId.current = null;
           isPanning.current = true;
           lastMouse.current = { x: e.clientX, y: e.clientY };
           canvas.style.cursor = "grabbing";
+          scheduleRedraw();
         }
       }
     }
@@ -315,6 +333,14 @@ function App(): React.JSX.Element {
       scheduleRedraw();
     }
 
+    function onKeyDown(e: KeyboardEvent): void {
+      if (editingRef.current) return;
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedCardId.current) {
+        removeCard(selectedCardId.current);
+        scheduleRedraw();
+      }
+    }
+
     resize();
     window.addEventListener("resize", resize);
     canvas.addEventListener("mousedown", onMouseDown);
@@ -322,6 +348,7 @@ function App(): React.JSX.Element {
     window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("dblclick", onDblClick);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown);
 
     return () => {
       window.removeEventListener("resize", resize);
@@ -330,13 +357,10 @@ function App(): React.JSX.Element {
       window.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("dblclick", onDblClick);
       canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
       cancelAnimationFrame(rafId.current);
     };
   }, [scheduleRedraw]);
-
-  function removeCard(cardId: string): void {
-    cards.current = cards.current.filter((c) => c.id !== cardId);
-  }
 
   function commitEdit(value: string): void {
     if (!editing) return;
