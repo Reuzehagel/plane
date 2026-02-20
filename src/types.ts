@@ -67,3 +67,10 @@ export interface ResizeState {
   startWidth: number;
   startHeight: number;
 }
+
+export interface ResizeTarget {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}

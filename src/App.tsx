@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, Snapshot } from "./types";
-import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen } from "./geometry";
+import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
+import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen, snapToGrid, snapPoint, lerpSnap } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot } from "./history";
 import {
@@ -42,6 +42,10 @@ function App(): React.JSX.Element {
   const resizeState = useRef<ResizeState | null>(null);
   const selectedCardIds = useRef<Set<string>>(new Set());
   const boxSelect = useRef<BoxSelectState | null>(null);
+  const dragSnapTargets = useRef<Map<string, Point>>(new Map());
+  const dragRafId = useRef<number>(0);
+  const resizeTarget = useRef<ResizeTarget | null>(null);
+  const resizeRafId = useRef<number>(0);
 
   const history = useRef<History>({ undoStack: [], redoStack: [] });
 
@@ -120,7 +124,8 @@ function App(): React.JSX.Element {
   }
 
   function createAndStartEditingCardAt(worldX: number, worldY: number): void {
-    const newCard = createCard(worldX - CARD_WIDTH / 2, worldY - CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, "");
+    const snap = snapPoint(worldX - CARD_WIDTH / 2, worldY - CARD_HEIGHT / 2);
+    const newCard = createCard(snap.x, snap.y, CARD_WIDTH, CARD_HEIGHT, "");
     saveSnapshot();
     insertCard(newCard);
     scheduleRedraw();
@@ -132,6 +137,32 @@ function App(): React.JSX.Element {
     if (!canvas) return;
 
     let canvasRect = canvas.getBoundingClientRect();
+
+    function animateDrag(): void {
+      if (!dragState.current) return;
+      for (const entry of dragState.current.offsets) {
+        const target = dragSnapTargets.current.get(entry.card.id);
+        if (!target) continue;
+        entry.card.x = lerpSnap(entry.card.x, target.x);
+        entry.card.y = lerpSnap(entry.card.y, target.y);
+      }
+      draw();
+      dragRafId.current = requestAnimationFrame(animateDrag);
+    }
+
+    function animateResize(): void {
+      if (!resizeState.current) return;
+      const t = resizeTarget.current;
+      if (t) {
+        const card = resizeState.current.card;
+        card.x = lerpSnap(card.x, t.x);
+        card.y = lerpSnap(card.y, t.y);
+        card.width = lerpSnap(card.width, t.w);
+        card.height = lerpSnap(card.height, t.h);
+        draw();
+      }
+      resizeRafId.current = requestAnimationFrame(animateResize);
+    }
 
     function resize(): void {
       if (!canvas) return;
@@ -227,6 +258,7 @@ function App(): React.JSX.Element {
           startWidth: handleHit.card.width,
           startHeight: handleHit.card.height,
         };
+        resizeRafId.current = requestAnimationFrame(animateResize);
         canvas.style.cursor = handleCursor(handleHit.handle);
         return;
       }
@@ -270,6 +302,7 @@ function App(): React.JSX.Element {
       }
       dragState.current = { offsets };
       cards.current = [...rest, ...selected];
+      dragRafId.current = requestAnimationFrame(animateDrag);
       scheduleRedraw();
       canvas.style.cursor = "grabbing";
     }
@@ -286,14 +319,12 @@ function App(): React.JSX.Element {
         const dir = RESIZE_DIR[rs.handle];
         const newW = rs.startWidth + dx * dir.wSign;
         const newH = rs.startHeight + dy * dir.hSign;
-        const clampedW = Math.max(CARD_MIN_WIDTH, Math.min(CARD_MAX_WIDTH, newW));
-        const clampedH = Math.max(CARD_MIN_HEIGHT, Math.min(CARD_MAX_HEIGHT, newH));
+        const clampedW = Math.max(CARD_MIN_WIDTH, Math.min(CARD_MAX_WIDTH, snapToGrid(newW)));
+        const clampedH = Math.max(CARD_MIN_HEIGHT, Math.min(CARD_MAX_HEIGHT, snapToGrid(newH)));
 
-        if (dir.movesX) rs.card.x = rs.startX + dx + (newW - clampedW);
-        if (dir.movesY) rs.card.y = rs.startY + dy + (newH - clampedH);
-        rs.card.width = clampedW;
-        rs.card.height = clampedH;
-        scheduleRedraw();
+        const targetX = dir.movesX ? rs.startX + (rs.startWidth - clampedW) : rs.startX;
+        const targetY = dir.movesY ? rs.startY + (rs.startHeight - clampedH) : rs.startY;
+        resizeTarget.current = { x: targetX, y: targetY, w: clampedW, h: clampedH };
         return;
       }
 
@@ -307,10 +338,8 @@ function App(): React.JSX.Element {
       if (dragState.current) {
         const world = mouseToWorld(e, canvasRect, camera.current);
         for (const entry of dragState.current.offsets) {
-          entry.card.x = world.x - entry.offsetX;
-          entry.card.y = world.y - entry.offsetY;
+          dragSnapTargets.current.set(entry.card.id, snapPoint(world.x - entry.offsetX, world.y - entry.offsetY));
         }
-        scheduleRedraw();
         return;
       }
 
@@ -346,6 +375,30 @@ function App(): React.JSX.Element {
           }
         }
         boxSelect.current = null;
+        scheduleRedraw();
+      }
+      if (dragState.current) {
+        cancelAnimationFrame(dragRafId.current);
+        for (const entry of dragState.current.offsets) {
+          const target = dragSnapTargets.current.get(entry.card.id)
+            ?? snapPoint(entry.card.x, entry.card.y);
+          entry.card.x = target.x;
+          entry.card.y = target.y;
+        }
+        dragSnapTargets.current.clear();
+        scheduleRedraw();
+      }
+      if (resizeState.current) {
+        cancelAnimationFrame(resizeRafId.current);
+        const t = resizeTarget.current;
+        if (t) {
+          const card = resizeState.current.card;
+          card.x = t.x;
+          card.y = t.y;
+          card.width = t.w;
+          card.height = t.h;
+          resizeTarget.current = null;
+        }
         scheduleRedraw();
       }
       resizeState.current = null;
@@ -403,6 +456,8 @@ function App(): React.JSX.Element {
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("wheel", onWheel);
       cancelAnimationFrame(rafId.current);
+      cancelAnimationFrame(dragRafId.current);
+      cancelAnimationFrame(resizeRafId.current);
     };
   }, [scheduleRedraw]);
 

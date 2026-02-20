@@ -22,7 +22,7 @@
 - [x] Card resizing (drag handles)
 - [ ] Multiline text / richer content
 - [ ] Card colors or labels
-- [ ] Snap to grid (optional)
+- [x] Snap to grid (always-on, smooth lerp animation)
 
 ## Connections
 

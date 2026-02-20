@@ -1,5 +1,5 @@
 import type { Camera, Card, HandleCorner, Point } from "./types";
-import { HANDLE_HIT_SIZE } from "./constants";
+import { DOT_SPACING, HANDLE_HIT_SIZE, SNAP_LERP, SNAP_EPSILON } from "./constants";
 
 function pointInRect(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
   return px >= x && px <= x + w && py >= y && py <= y + h;
@@ -26,6 +26,20 @@ export function mouseToScreen(e: MouseEvent, rect: DOMRect): Point {
 export function mouseToWorld(e: MouseEvent, rect: DOMRect, cam: Camera): Point {
   const { x, y } = mouseToScreen(e, rect);
   return screenToWorld(x, y, cam);
+}
+
+export function snapToGrid(value: number): number {
+  return Math.round(value / DOT_SPACING) * DOT_SPACING;
+}
+
+export function snapPoint(x: number, y: number): Point {
+  return { x: snapToGrid(x), y: snapToGrid(y) };
+}
+
+// Lerp toward target, snapping exactly when close enough to avoid sub-pixel drift
+export function lerpSnap(current: number, target: number): number {
+  const d = target - current;
+  return Math.abs(d) < SNAP_EPSILON ? target : current + d * SNAP_LERP;
 }
 
 export function hitTestCards(wx: number, wy: number, cards: Card[]): Card | null {

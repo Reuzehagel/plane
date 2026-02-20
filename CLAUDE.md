@@ -33,9 +33,9 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Modules
 - `src/main.tsx` — React entry point
 - `src/App.tsx` — Canvas app: event handling, editing overlay, all interaction logic
-- `src/types.ts` — Shared interfaces (Point, Card, Camera, DragState, EditingState, BoxSelectState, ContextMenuState, ResizeState, HandleCorner, Snapshot, History)
+- `src/types.ts` — Shared interfaces (Point, Card, Camera, DragState, EditingState, BoxSelectState, ContextMenuState, ResizeState, ResizeTarget, HandleCorner, Snapshot, History)
 - `src/constants.ts` — Visual and behavior constants
-- `src/geometry.ts` — Coordinate conversion and hit testing (screenToWorld, worldToScreen, mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, getCardCorners)
+- `src/geometry.ts` — Coordinate conversion, hit testing, and snap/lerp utilities (screenToWorld, worldToScreen, mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, getCardCorners, snapToGrid, snapPoint, lerpSnap)
 - `src/rendering.ts` — Canvas 2D draw functions (drawScene)
 - `src/history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
 - `src/menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
@@ -44,6 +44,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Rendering Pipeline
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
 - `scheduleRedraw()` must be called after every ref mutation that affects visuals — it debounces via `requestAnimationFrame`
+- Continuous animation loops (drag/resize lerp) call `draw()` directly and manage their own RAF cycle, separate from `scheduleRedraw()`
 - React-rendered DOM overlays (card editor `<input>`, context menu `<div>`) are positioned absolutely over the canvas at screen coordinates
 
 ### State
@@ -81,3 +82,9 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - Card menu: Edit, Duplicate, Copy, Reset Size, Delete; empty-space menu: Paste, New Card
 - Internal clipboard ref (`Card | null`) — not system clipboard
 - Menu closes on: left-click, Escape, scroll/zoom
+
+### Snap-to-Grid
+- All card positions snap to `DOT_SPACING` (24px) grid — always on, no toggle
+- All card dimension constants (`CARD_WIDTH`, `CARD_MIN_*`, `CARD_MAX_*`) must be multiples of `DOT_SPACING`
+- Drag and resize use a lerp animation pattern: mousemove sets snap targets in a ref, a continuous RAF loop lerps toward targets via `lerpSnap()`, mouseup settles to exact values
+- RAF animation loops must always reschedule themselves while active — early-returning before `requestAnimationFrame()` kills the loop

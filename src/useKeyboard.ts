@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Card, ContextMenuState, EditingState, History, Point, Snapshot } from "./types";
 import { undo, redo } from "./history";
 import { NUDGE_AMOUNT } from "./constants";
+import { snapToGrid } from "./geometry";
 
 const NUDGE_DIR: Record<string, Point> = {
   ArrowLeft:  { x: -NUDGE_AMOUNT, y: 0 },
@@ -72,8 +73,8 @@ export function useKeyboard(deps: KeyboardDeps): void {
         d.saveSnapshot();
         for (const card of d.cards.current) {
           if (d.selectedCardIds.current.has(card.id)) {
-            card.x += offset.x;
-            card.y += offset.y;
+            card.x = snapToGrid(card.x + offset.x);
+            card.y = snapToGrid(card.y + offset.y);
           }
         }
         d.scheduleRedraw();

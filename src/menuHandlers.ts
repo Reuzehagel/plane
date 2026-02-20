@@ -1,6 +1,7 @@
 import type React from "react";
 import type { Card, ContextMenuState } from "./types";
 import { CARD_WIDTH, CARD_HEIGHT, DUPLICATE_OFFSET } from "./constants";
+import { snapPoint } from "./geometry";
 
 export interface MenuHandlerDeps {
   contextMenu: ContextMenuState | null;
@@ -56,7 +57,8 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     const card = getMenuCard(deps);
     if (!card) return;
     runMenuAction(deps, () => {
-      const clone = deps.createCard(card.x + DUPLICATE_OFFSET, card.y + DUPLICATE_OFFSET, card.width, card.height, card.title);
+      const pos = snapPoint(card.x + DUPLICATE_OFFSET, card.y + DUPLICATE_OFFSET);
+      const clone = deps.createCard(pos.x, pos.y, card.width, card.height, card.title);
       deps.insertCard(clone);
     });
   }
@@ -94,11 +96,8 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     const { worldX, worldY } = deps.contextMenu;
     const src = deps.clipboard.current;
     runMenuAction(deps, () => {
-      const newCard = deps.createCard(
-        worldX - src.width / 2,
-        worldY - src.height / 2,
-        src.width, src.height, src.title,
-      );
+      const pos = snapPoint(worldX - src.width / 2, worldY - src.height / 2);
+      const newCard = deps.createCard(pos.x, pos.y, src.width, src.height, src.title);
       deps.insertCard(newCard);
     });
   }
