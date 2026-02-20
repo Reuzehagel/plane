@@ -33,11 +33,13 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Modules
 - `src/main.tsx` — React entry point
 - `src/App.tsx` — Canvas app: event handling, editing overlay, all interaction logic
-- `src/types.ts` — Shared interfaces (Card, Camera, DragState, EditingState, ContextMenuState, ResizeState, Snapshot, History)
+- `src/types.ts` — Shared interfaces (Point, Card, Camera, DragState, EditingState, BoxSelectState, ContextMenuState, ResizeState, HandleCorner, Snapshot, History)
 - `src/constants.ts` — Visual and behavior constants
-- `src/geometry.ts` — Coordinate conversion (screenToWorld, worldToScreen, mouseToWorld, hitTestCards)
+- `src/geometry.ts` — Coordinate conversion and hit testing (screenToWorld, worldToScreen, mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, getCardCorners)
 - `src/rendering.ts` — Canvas 2D draw functions (drawScene, drawRoundRect)
 - `src/history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
+- `src/menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, paste, delete, new card)
+- `src/useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all)
 
 ### Rendering Pipeline
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
@@ -51,7 +53,9 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - Camera stores pan as world-space offset (`cam.x`, `cam.y`) and a `zoom` scalar
 
 ### Event Handling
-- All canvas interaction (mouse, keyboard) is handled via native event listeners in a single `useEffect`, not React event props
+- Mouse interaction is handled via native event listeners in a single `useEffect` in App.tsx, not React event props
+- Keyboard shortcuts are extracted to `useKeyboard.ts` hook
+- Extracted modules (`menuHandlers.ts`, `useKeyboard.ts`) receive a `*Deps` interface — keeps them decoupled from App internals
 - For each React state that imperative event handlers need, a parallel ref mirrors it (e.g. `editingRef` ↔ `editing`, `contextMenuRef` ↔ `contextMenu`)
 
 ### Selection
@@ -63,7 +67,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - Snapshot-based: deep clones of `cards` + `selectedCardIds` before each user action (`src/history.ts`)
 - `saveSnapshot()` before mutating state; one snapshot per user action (drag captures at mousedown, not per frame)
 - `removeCard()` is a low-level helper — callers push snapshots, not `removeCard` itself
-- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; arrow keys nudge selected cards by `NUDGE_AMOUNT` px
+- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; Delete/Backspace deletes selected; Ctrl+A selects all; arrow keys nudge by `NUDGE_AMOUNT` px
 
 ### Context Menu
 - Right-click opens a context menu (DOM overlay, same pattern as card editor)

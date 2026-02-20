@@ -1,10 +1,10 @@
 import type { BoxSelectState, Camera, Card } from "./types";
-import { worldToScreen } from "./geometry";
+import { worldToScreen, getCardCorners } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
   CARD_RADIUS, CARD_BG, CARD_BORDER, CARD_TEXT,
   CARD_SHADOW, CARD_SELECTED_BORDER, HANDLE_SIZE,
-  CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
+  CARD_FONT_SIZE, CARD_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
 } from "./constants";
 
@@ -40,25 +40,22 @@ interface ScreenRect {
 }
 
 export function drawScene(
-  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  dpr: number,
+  width: number,
+  height: number,
   camera: Camera,
   cards: Card[],
   selectedCardIds: Set<string>,
   boxSelect: BoxSelectState | null,
 ): void {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const dpr = window.devicePixelRatio || 1;
   const { x: camX, y: camY, zoom } = camera;
-  const w = canvas.width / dpr;
-  const h = canvas.height / dpr;
 
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   ctx.fillStyle = BG_COLOR;
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, width, height);
 
   // Dots become indistinguishable below ~4px spacing
   const spacing = DOT_SPACING * zoom;
@@ -70,9 +67,9 @@ export function drawScene(
     const dotR = DOT_RADIUS * Math.min(zoom, 1.5);
 
     ctx.fillStyle = DOT_COLOR;
-    for (let x = startX; x < w + spacing; x += spacing) {
+    for (let x = startX; x < width + spacing; x += spacing) {
       ctx.beginPath();
-      for (let y = startY; y < h + spacing; y += spacing) {
+      for (let y = startY; y < height + spacing; y += spacing) {
         ctx.moveTo(x + dotR, y);
         ctx.arc(x, y, dotR, 0, TWO_PI);
       }
@@ -119,7 +116,7 @@ export function drawScene(
       const clipPath = roundRectPath(sx + CARD_TEXT_CLIP_PAD * zoom, sy, sw - CARD_TEXT_CLIP_PAD * 2 * zoom, sh, sr);
       ctx.clip(clipPath);
       ctx.fillStyle = CARD_TEXT;
-      ctx.font = `${CARD_FONT_SIZE * zoom}px Inter, system-ui, sans-serif`;
+      ctx.font = `${CARD_FONT_SIZE * zoom}px ${CARD_FONT}`;
       ctx.textBaseline = "middle";
       ctx.fillText(card.title, sx + CARD_TEXT_PAD * zoom, sy + sh / 2);
       ctx.restore();
@@ -132,13 +129,7 @@ export function drawScene(
   ctx.lineWidth = 1;
 
   for (const { sx, sy, sw, sh } of selectedRects) {
-    const corners: [number, number][] = [
-      [sx, sy],
-      [sx + sw, sy],
-      [sx, sy + sh],
-      [sx + sw, sy + sh],
-    ];
-    for (const [cx, cy] of corners) {
+    for (const [cx, cy] of getCardCorners(sx, sy, sw, sh)) {
       const hx = cx - HALF_HANDLE;
       const hy = cy - HALF_HANDLE;
       ctx.fillRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);

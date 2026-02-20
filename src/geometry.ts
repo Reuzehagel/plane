@@ -36,6 +36,13 @@ export function hitTestCards(wx: number, wy: number, cards: Card[]): Card | null
   return null;
 }
 
+// Order must match HANDLE_CORNERS — both are co-located to prevent drift
+const HANDLE_CORNERS: HandleCorner[] = ["nw", "ne", "sw", "se"];
+
+export function getCardCorners(sx: number, sy: number, sw: number, sh: number): [number, number][] {
+  return [[sx, sy], [sx + sw, sy], [sx, sy + sh], [sx + sw, sy + sh]];
+}
+
 export function hitTestHandles(
   screenX: number,
   screenY: number,
@@ -50,13 +57,11 @@ export function hitTestHandles(
     const { x: sx, y: sy } = worldToScreen(card.x, card.y, cam);
     const sw = card.width * cam.zoom;
     const sh = card.height * cam.zoom;
-    const corners: [number, number, HandleCorner][] = [
-      [sx, sy, "nw"], [sx + sw, sy, "ne"],
-      [sx, sy + sh, "sw"], [sx + sw, sy + sh, "se"],
-    ];
-    for (const [cx, cy, handle] of corners) {
+    const corners = getCardCorners(sx, sy, sw, sh);
+    for (let j = 0; j < corners.length; j++) {
+      const [cx, cy] = corners[j];
       if (pointInRect(screenX, screenY, cx - half, cy - half, HANDLE_HIT_SIZE, HANDLE_HIT_SIZE)) {
-        return { card, handle };
+        return { card, handle: HANDLE_CORNERS[j] };
       }
     }
   }

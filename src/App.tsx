@@ -3,13 +3,15 @@ import "./App.css";
 import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, History, Point, ResizeState, Snapshot } from "./types";
 import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, worldToScreen } from "./geometry";
 import { drawScene } from "./rendering";
-import { pushSnapshot, undo, redo } from "./history";
+import { pushSnapshot } from "./history";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
-  CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS, NUDGE_AMOUNT,
+  CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
   CARD_FONT_SIZE, CARD_TEXT_PAD,
 } from "./constants";
+import { useKeyboard } from "./useKeyboard";
+import { createMenuHandlers } from "./menuHandlers";
 
 // Pairs useState with a ref that stays in sync, so imperative event handlers
 // can always read the latest value without stale closures.
@@ -47,10 +49,15 @@ function App(): React.JSX.Element {
   const [contextMenu, contextMenuRef, setContextMenu] = useRefState<ContextMenuState | null>(null);
   const clipboard = useRef<Card | null>(null);
 
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+
   const draw = useCallback((): void => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    drawScene(canvas, camera.current, cards.current, selectedCardIds.current, boxSelect.current);
+    if (!ctxRef.current) ctxRef.current = canvas.getContext("2d");
+    if (!ctxRef.current) return;
+    const dpr = window.devicePixelRatio || 1;
+    drawScene(ctxRef.current, dpr, canvas.width / dpr, canvas.height / dpr, camera.current, cards.current, selectedCardIds.current, boxSelect.current);
   }, []);
 
   const scheduleRedraw = useCallback((): void => {
@@ -86,6 +93,11 @@ function App(): React.JSX.Element {
     return cards.current.find((c) => c.id === cardId);
   }
 
+  function deleteSelectedCards(): void {
+    cards.current = cards.current.filter((card) => !selectedCardIds.current.has(card.id));
+    selectedCardIds.current.clear();
+  }
+
   function selectCard(cardId: string): void {
     selectedCardIds.current.clear();
     selectedCardIds.current.add(cardId);
@@ -107,10 +119,12 @@ function App(): React.JSX.Element {
     });
   }
 
-  // Returns the card targeted by the context menu, or null if missing
-  function getMenuCard(): Card | undefined {
-    if (!contextMenu?.cardId) return undefined;
-    return findCard(contextMenu.cardId);
+  function createAndStartEditingCardAt(worldX: number, worldY: number): void {
+    const newCard = createCard(worldX - CARD_WIDTH / 2, worldY - CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, "");
+    saveSnapshot();
+    insertCard(newCard);
+    scheduleRedraw();
+    requestAnimationFrame(() => openEditor(newCard));
   }
 
   useEffect(() => {
@@ -176,9 +190,10 @@ function App(): React.JSX.Element {
     }
 
     function startPanning(e: MouseEvent): void {
+      if (!canvas) return;
       isPanning.current = true;
       lastMouse.current = { x: e.clientX, y: e.clientY };
-      canvas!.style.cursor = "grabbing";
+      canvas.style.cursor = "grabbing";
     }
 
     function onMouseDown(e: MouseEvent): void {
@@ -313,6 +328,7 @@ function App(): React.JSX.Element {
     }
 
     function onMouseUp(e: MouseEvent): void {
+      if (e.button !== 0 && e.button !== 1) return;
       if (boxSelect.current) {
         const { start, current } = boxSelect.current;
         const minX = Math.min(start.x, current.x);
@@ -348,12 +364,7 @@ function App(): React.JSX.Element {
         return;
       }
 
-      const newCard = createCard(world.x - CARD_WIDTH / 2, world.y - CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, "");
-      saveSnapshot();
-      cards.current.push(newCard);
-      scheduleRedraw();
-      // Delay so the canvas redraws before positioning the editor overlay
-      requestAnimationFrame(() => openEditor(newCard));
+      createAndStartEditingCardAt(world.x, world.y);
     }
 
     function onWheel(e: WheelEvent): void {
@@ -374,69 +385,6 @@ function App(): React.JSX.Element {
       scheduleRedraw();
     }
 
-    function nudgeOffset(key: string): Point | null {
-      switch (key) {
-        case "ArrowLeft":  return { x: -NUDGE_AMOUNT, y: 0 };
-        case "ArrowRight": return { x:  NUDGE_AMOUNT, y: 0 };
-        case "ArrowUp":    return { x: 0, y: -NUDGE_AMOUNT };
-        case "ArrowDown":  return { x: 0, y:  NUDGE_AMOUNT };
-        default:           return null;
-      }
-    }
-
-    function onKeyDown(e: KeyboardEvent): void {
-      if (contextMenuRef.current) {
-        if (e.key === "Escape") setContextMenu(null);
-        return;
-      }
-      if (editingRef.current) return;
-
-      const mod = e.ctrlKey || e.metaKey;
-
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedCardIds.current.size > 0) {
-        saveSnapshot();
-        for (const id of selectedCardIds.current) {
-          removeCard(id);
-        }
-        scheduleRedraw();
-        return;
-      }
-
-      if (e.key === "a" && mod) {
-        selectAllCards();
-        scheduleRedraw();
-        e.preventDefault();
-        return;
-      }
-
-      if (e.key === "z" && mod && !e.shiftKey) {
-        const snapshot = undo(history.current, cards.current, selectedCardIds.current);
-        if (snapshot) applySnapshot(snapshot);
-        e.preventDefault();
-        return;
-      }
-
-      if ((e.key === "z" && mod && e.shiftKey) || (e.key === "y" && mod)) {
-        const snapshot = redo(history.current, cards.current, selectedCardIds.current);
-        if (snapshot) applySnapshot(snapshot);
-        e.preventDefault();
-        return;
-      }
-
-      const offset = nudgeOffset(e.key);
-      if (offset && selectedCardIds.current.size > 0) {
-        saveSnapshot();
-        for (const card of cards.current) {
-          if (selectedCardIds.current.has(card.id)) {
-            card.x += offset.x;
-            card.y += offset.y;
-          }
-        }
-        scheduleRedraw();
-        e.preventDefault();
-      }
-    }
-
     resize();
     window.addEventListener("resize", resize);
     canvas.addEventListener("mousedown", onMouseDown);
@@ -445,7 +393,6 @@ function App(): React.JSX.Element {
     canvas.addEventListener("dblclick", onDblClick);
     canvas.addEventListener("contextmenu", onContextMenu);
     canvas.addEventListener("wheel", onWheel, { passive: false });
-    window.addEventListener("keydown", onKeyDown);
 
     return () => {
       window.removeEventListener("resize", resize);
@@ -455,7 +402,6 @@ function App(): React.JSX.Element {
       canvas.removeEventListener("dblclick", onDblClick);
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("wheel", onWheel);
-      window.removeEventListener("keydown", onKeyDown);
       cancelAnimationFrame(rafId.current);
     };
   }, [scheduleRedraw]);
@@ -465,6 +411,7 @@ function App(): React.JSX.Element {
     const card = findCard(editing.cardId);
     if (card) {
       if (value.trim() === "" && card.title === "") {
+        saveSnapshot();
         removeCard(editing.cardId);
       } else {
         if (card.title !== value) saveSnapshot();
@@ -479,85 +426,28 @@ function App(): React.JSX.Element {
     if (!editing) return;
     const card = findCard(editing.cardId);
     if (card && card.title === "") {
+      saveSnapshot();
       removeCard(editing.cardId);
       scheduleRedraw();
     }
     setEditing(null);
   }
 
-  function handleMenuEdit(): void {
-    const card = getMenuCard();
-    if (!card) return;
-    setContextMenu(null);
-    openEditor(card);
-  }
+  useKeyboard({
+    contextMenuRef, editingRef, selectedCardIds, cards, history,
+    setContextMenu, saveSnapshot, deleteSelectedCards,
+    selectAllCards, applySnapshot, scheduleRedraw,
+  });
 
-  function handleMenuDuplicate(): void {
-    const card = getMenuCard();
-    if (!card) return;
-    saveSnapshot();
-    const clone = createCard(card.x + 20, card.y + 20, card.width, card.height, card.title);
-    insertCard(clone);
-    setContextMenu(null);
-    scheduleRedraw();
-  }
-
-  function handleMenuCopy(): void {
-    const card = getMenuCard();
-    if (!card) return;
-    clipboard.current = { ...card };
-    setContextMenu(null);
-  }
-
-  function handleMenuResetSize(): void {
-    const card = getMenuCard();
-    if (!card) return;
-    saveSnapshot();
-    card.width = CARD_WIDTH;
-    card.height = CARD_HEIGHT;
-    setContextMenu(null);
-    scheduleRedraw();
-  }
-
-  function handleMenuDelete(): void {
-    if (!contextMenu?.cardId) return;
-    saveSnapshot();
-    if (selectedCardIds.current.has(contextMenu.cardId)) {
-      for (const id of selectedCardIds.current) {
-        removeCard(id);
-      }
-    } else {
-      removeCard(contextMenu.cardId);
-    }
-    setContextMenu(null);
-    scheduleRedraw();
-  }
-
-  function handleMenuPaste(): void {
-    if (!contextMenu || !clipboard.current) return;
-    saveSnapshot();
-    const src = clipboard.current;
-    const newCard = createCard(
-      contextMenu.worldX - src.width / 2,
-      contextMenu.worldY - src.height / 2,
-      src.width, src.height, src.title,
-    );
-    insertCard(newCard);
-    setContextMenu(null);
-    scheduleRedraw();
-  }
-
-  function handleMenuNewCard(): void {
-    if (!contextMenu) return;
-    saveSnapshot();
-    const cardX = contextMenu.worldX - CARD_WIDTH / 2;
-    const cardY = contextMenu.worldY - CARD_HEIGHT / 2;
-    const newCard = createCard(cardX, cardY, CARD_WIDTH, CARD_HEIGHT, "");
-    insertCard(newCard);
-    setContextMenu(null);
-    scheduleRedraw();
-    requestAnimationFrame(() => openEditor(newCard));
-  }
+  const {
+    handleMenuEdit, handleMenuDuplicate, handleMenuCopy,
+    handleMenuResetSize, handleMenuDelete, handleMenuPaste, handleMenuNewCard,
+  } = createMenuHandlers({
+    contextMenu, selectedCardIds, clipboard,
+    findCard, removeCard, deleteSelectedCards, createCard, insertCard, openEditor,
+    createAndStartEditingCardAt,
+    saveSnapshot, setContextMenu, scheduleRedraw,
+  });
 
   return (
     <>
