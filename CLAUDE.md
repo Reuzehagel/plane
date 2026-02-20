@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just build` — build release binary
 - `just check` — type-check (`bun run tsc --noEmit`)
 - `just frontend` — frontend dev server only
+- `just install` — install dependencies (`bun install`)
 - Always use `bun`, never `npx` or `node_modules/.bin`
 
 ## Stack
@@ -19,6 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `function` declarations over arrow functions
 - Explicit return types on all functions
 - Shared types in `src/types.ts`
+- Constants in `src/constants.ts`; pure logic modules (e.g. `src/history.ts`, `src/geometry.ts`) have no React dependencies
 - Use refs (not state) for high-frequency data (camera, cards, drag state)
 - Only use React state when a re-render is needed (e.g. editing overlay)
 - Keep comments to "why", not "what"
@@ -26,6 +28,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 The app is a single `App` component (`src/App.tsx`) that owns a full-window `<canvas>` and all interaction logic.
+
+### Modules
+- `src/main.tsx` — React entry point
+- `src/App.tsx` — Canvas app: event handling, editing overlay, all interaction logic
+- `src/types.ts` — Shared interfaces (Card, Camera, DragState, EditingState, Snapshot, History)
+- `src/constants.ts` — Visual and behavior constants
+- `src/geometry.ts` — Coordinate conversion (screenToWorld, worldToScreen, mouseToWorld, hitTestCards)
+- `src/rendering.ts` — Canvas 2D draw functions (drawScene, drawRoundRect)
+- `src/history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
 
 ### Rendering Pipeline
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
@@ -46,3 +57,9 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 - `selectedCardIds` is a `Set<string>` ref, not React state
 - Shift-click toggles individual card selection; shift-drag on empty space does box select
 - Cards are hit-tested back-to-front; selected cards are moved to end of array (top of z-order)
+
+### Undo/Redo
+- Snapshot-based: deep clones of `cards` + `selectedCardIds` before each user action (`src/history.ts`)
+- `saveSnapshot()` before mutating state; one snapshot per user action (drag captures at mousedown, not per frame)
+- `removeCard()` is a low-level helper — callers push snapshots, not `removeCard` itself
+- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; arrow keys nudge selected cards by `NUDGE_AMOUNT` px

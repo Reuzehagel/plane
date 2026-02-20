@@ -13,3 +13,5 @@ export const CARD_BORDER = "#3a3a5c";
 export const CARD_TEXT = "#e0e0e0";
 export const CARD_SHADOW = "rgba(0, 0, 0, 0.4)";
 export const CARD_SELECTED_BORDER = "#7a7aff";
+
+export const NUDGE_AMOUNT = 10;

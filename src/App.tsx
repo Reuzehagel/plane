@@ -1,11 +1,12 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, DragState, EditingState, Point } from "./types";
+import type { BoxSelectState, Camera, Card, DragState, EditingState, History, Point, Snapshot } from "./types";
 import { mouseToWorld, hitTestCards, worldToScreen } from "./geometry";
 import { drawScene } from "./rendering";
+import { pushSnapshot, undo, redo } from "./history";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
-  CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
+  CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS, NUDGE_AMOUNT,
 } from "./constants";
 
 function App(): React.JSX.Element {
@@ -20,6 +21,8 @@ function App(): React.JSX.Element {
   const selectedCardIds = useRef<Set<string>>(new Set());
   const boxSelect = useRef<BoxSelectState | null>(null);
 
+  const history = useRef<History>({ undoStack: [], redoStack: [] });
+
   const [editing, setEditing] = useState<EditingState | null>(null);
   const editingRef = useRef<EditingState | null>(null);
 
@@ -33,6 +36,16 @@ function App(): React.JSX.Element {
     cancelAnimationFrame(rafId.current);
     rafId.current = requestAnimationFrame(draw);
   }, [draw]);
+
+  function saveSnapshot(): void {
+    pushSnapshot(history.current, cards.current, selectedCardIds.current);
+  }
+
+  function applySnapshot(snapshot: Snapshot): void {
+    cards.current = snapshot.cards;
+    selectedCardIds.current = snapshot.selectedCardIds;
+    scheduleRedraw();
+  }
 
   function removeCard(cardId: string): void {
     cards.current = cards.current.filter((c) => c.id !== cardId);
@@ -95,6 +108,7 @@ function App(): React.JSX.Element {
               selectedCardIds.current.clear();
               selectedCardIds.current.add(hit.id);
             }
+            saveSnapshot();
             dragState.current = {
               offsets: cards.current
                 .filter((c) => selectedCardIds.current.has(c.id))
@@ -213,6 +227,7 @@ function App(): React.JSX.Element {
         height: CARD_HEIGHT,
         title: "",
       };
+      saveSnapshot();
       cards.current.push(newCard);
       scheduleRedraw();
       // Delay so the canvas redraws before positioning the editor overlay
@@ -238,15 +253,60 @@ function App(): React.JSX.Element {
       scheduleRedraw();
     }
 
+    function nudgeOffset(key: string): Point | null {
+      switch (key) {
+        case "ArrowLeft":  return { x: -NUDGE_AMOUNT, y: 0 };
+        case "ArrowRight": return { x:  NUDGE_AMOUNT, y: 0 };
+        case "ArrowUp":    return { x: 0, y: -NUDGE_AMOUNT };
+        case "ArrowDown":  return { x: 0, y:  NUDGE_AMOUNT };
+        default:           return null;
+      }
+    }
+
     function onKeyDown(e: KeyboardEvent): void {
       if (editingRef.current) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+
       if ((e.key === "Delete" || e.key === "Backspace") && selectedCardIds.current.size > 0) {
+        saveSnapshot();
         for (const id of selectedCardIds.current) {
           removeCard(id);
         }
         scheduleRedraw();
-      } else if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
+        return;
+      }
+
+      if (e.key === "a" && mod) {
         selectedCardIds.current = new Set(cards.current.map((c) => c.id));
+        scheduleRedraw();
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === "z" && mod && !e.shiftKey) {
+        const snapshot = undo(history.current, cards.current, selectedCardIds.current);
+        if (snapshot) applySnapshot(snapshot);
+        e.preventDefault();
+        return;
+      }
+
+      if ((e.key === "z" && mod && e.shiftKey) || (e.key === "y" && mod)) {
+        const snapshot = redo(history.current, cards.current, selectedCardIds.current);
+        if (snapshot) applySnapshot(snapshot);
+        e.preventDefault();
+        return;
+      }
+
+      const offset = nudgeOffset(e.key);
+      if (offset && selectedCardIds.current.size > 0) {
+        saveSnapshot();
+        for (const card of cards.current) {
+          if (selectedCardIds.current.has(card.id)) {
+            card.x += offset.x;
+            card.y += offset.y;
+          }
+        }
         scheduleRedraw();
         e.preventDefault();
       }
@@ -280,6 +340,7 @@ function App(): React.JSX.Element {
       if (value.trim() === "" && card.title === "") {
         removeCard(editing.cardId);
       } else {
+        if (card.title !== value) saveSnapshot();
         card.title = value;
       }
     }

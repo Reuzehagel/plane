@@ -40,3 +40,13 @@ export interface BoxSelectState {
   start: Point;
   current: Point;
 }
+
+export interface Snapshot {
+  cards: Card[];
+  selectedCardIds: Set<string>;
+}
+
+export interface History {
+  undoStack: Snapshot[];
+  redoStack: Snapshot[];
+}
