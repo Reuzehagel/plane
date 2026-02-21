@@ -9,13 +9,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just dev` — run Electron + Vite dev server (Note, don't use this unless told to.)
 - `just build` — build frontend + Electron
 - `just check` — type-check (`bun run tsc --noEmit`)
-- `just frontend` — frontend dev server only
+- `just frontend` — alias for `just dev` (same command)
 - `just install` — install dependencies (`bun install`)
 - When asked to commit, always use the `/commit-commands:commit` skill
 
 ## Stack
 
 - Electron + React 19 + TypeScript + Vite (via `vite-plugin-electron`)
+- Tailwind CSS 4 (via `@tailwindcss/vite`) for DOM overlay styling; `lucide-react` for icons
 - Canvas 2D rendering (not DOM-based UI) with infinite pan/zoom
 - Electron main/preload in `electron/` — IPC-based file persistence scoped to `app.getPath('userData')`
 - `"type": "module"` in package.json → main process is ESM (no `__dirname`, use `import.meta.url`)
@@ -58,6 +59,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
   - `history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
   - `mutation.ts` — `runMutation(deps, action)` helper: saveSnapshot → action → scheduleRedraw → markDirty
   - `menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
+  - `textLayout.ts` — Canvas text wrapping (`wrapText`) and auto-height calculation (`computeCardHeight`)
   - `fuzzySearch.ts` — Fuzzy scoring and filtering (used by command palette)
   - `persistence.ts` — Workspace save/load via Electron IPC (`window.electronAPI`)
 
