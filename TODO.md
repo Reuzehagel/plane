@@ -27,7 +27,7 @@
 ## High Priority
 
 - [ ] Command palette (Ctrl+K) — fuzzy search cards/grids, quick actions
-- [ ] Clipboard paste as card (Ctrl+V on empty space → new card with text)
+- [x] Clipboard paste as card (Ctrl+V on empty space → new card with text)
 - [ ] Multiline text / rich content (markdown?)
 - [ ] Presentation mode — define waypoints, camera flies between cards
 

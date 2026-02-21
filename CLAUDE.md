@@ -32,13 +32,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-The app is a single `App` component (`src/App.tsx`) that owns a full-window `<canvas>` and all interaction logic.
+The app is a single `App` component (`src/App.tsx`) that owns a full-window `<canvas>`, with interaction logic extracted into hooks.
 
 ### Modules
 
 - `src/main.tsx` — React entry point
 - `src/App.tsx` — Canvas app: state declarations, card CRUD, editor, history/persistence, grid management, rendering
-- `src/types.ts` — Shared interfaces (Point, Card, Camera, DragState, EditingState, BoxSelectState, ContextMenuState, ResizeState, ResizeTarget, HandleCorner, Snapshot, History)
+- `src/types.ts` — All shared interfaces and type aliases
 - `src/constants.ts` — Visual and behavior constants
 - `src/geometry.ts` — Coordinate conversion, hit testing, snap/lerp utilities, viewport helpers, and `rectsIntersect`
 - `src/rendering.ts` — Canvas 2D draw functions (drawScene)
@@ -59,7 +59,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 
 ### State
 
-- Workspace (grids, cards, cameras) persists to localStorage via `src/persistence.ts` with 2s debounced save
+- Workspace (grids, cards, cameras) persists to Tauri AppData via `src/persistence.ts` with 2s debounced save and v1→v2 migration
 - Card editor is a single-line `<input>`, not multi-line
 
 ### Coordinate System

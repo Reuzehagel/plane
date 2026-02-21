@@ -24,6 +24,8 @@ export interface KeyboardDeps {
   selectAllCards: () => void;
   applySnapshot: (s: Snapshot) => void;
   fitToContent: () => void;
+  copySelectedCards: () => void;
+  pasteFromClipboard: () => void;
   scheduleRedraw: () => void;
   markDirty: () => void;
 }
@@ -71,6 +73,18 @@ export function useKeyboard(deps: KeyboardDeps): void {
 
       if (e.key === "1" && mod) {
         d.fitToContent();
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === "c" && mod) {
+        d.copySelectedCards();
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === "v" && mod) {
+        d.pasteFromClipboard();
         e.preventDefault();
         return;
       }

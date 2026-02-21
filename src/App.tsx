@@ -1,13 +1,13 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
 import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
-import { worldToScreen, snapPoint, getContentBounds, isContentVisible } from "./geometry";
+import { screenToWorld, worldToScreen, snapPoint, getContentBounds, getBoundsCenter, isContentVisible } from "./geometry";
 import { drawScene } from "./rendering";
 import { pushSnapshot } from "./history";
 import {
   MIN_ZOOM, MAX_ZOOM,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
-  CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS,
+  CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS, DUPLICATE_OFFSET,
   CAMERA_LERP, CAMERA_FOCAL_EPSILON, CAMERA_ZOOM_EPSILON, FIT_PADDING,
 } from "./constants";
 import { useKeyboard } from "./useKeyboard";
@@ -49,7 +49,7 @@ function App(): React.JSX.Element {
 
   const [editing, editingRef, setEditing] = useRefState<EditingState | null>(null);
   const [contextMenu, contextMenuRef, setContextMenu] = useRefState<ContextMenuState | null>(null);
-  const clipboard = useRef<Card | null>(null);
+  const clipboard = useRef<Card[]>([]);
 
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isLoaded = useRef(false);
@@ -200,6 +200,50 @@ function App(): React.JSX.Element {
     requestAnimationFrame(() => openEditor(newCard));
   }
 
+  function copySelectedCards(): void {
+    if (selectedCardIds.current.size === 0) return;
+    clipboard.current = cards.current
+      .filter((c) => selectedCardIds.current.has(c.id))
+      .map((c) => ({ ...c }));
+  }
+
+  function pasteCardsAtPoint(sources: Card[], worldX: number, worldY: number): void {
+    const bounds = getContentBounds(sources);
+    if (!bounds) return;
+    const center = getBoundsCenter(bounds);
+    const dx = worldX - center.x;
+    const dy = worldY - center.y;
+    runMutation({ saveSnapshot, scheduleRedraw, markDirty }, () => {
+      selectedCardIds.current.clear();
+      for (const s of sources) {
+        const pos = snapPoint(s.x + dx, s.y + dy);
+        const newCard = createCard(pos.x, pos.y, s.width, s.height, s.title, s.color);
+        cards.current.push(newCard);
+        selectedCardIds.current.add(newCard.id);
+      }
+    });
+  }
+
+  function viewportCenter(): Point {
+    return screenToWorld(window.innerWidth / 2, window.innerHeight / 2, camera.current);
+  }
+
+  function pasteFromClipboard(): void {
+    if (clipboard.current.length > 0) {
+      const center = viewportCenter();
+      pasteCardsAtPoint(clipboard.current, center.x + DUPLICATE_OFFSET, center.y + DUPLICATE_OFFSET);
+    } else {
+      navigator.clipboard.readText().then((text) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        const center = viewportCenter();
+        const snap = snapPoint(center.x - CARD_WIDTH / 2, center.y - CARD_HEIGHT / 2);
+        const newCard = createCard(snap.x, snap.y, CARD_WIDTH, CARD_HEIGHT, trimmed);
+        runMutation({ saveSnapshot, scheduleRedraw, markDirty }, () => insertCard(newCard));
+      });
+    }
+  }
+
   function fitToContent(): void {
     cancelAnimationFrame(cameraAnimId.current);
 
@@ -218,8 +262,9 @@ function App(): React.JSX.Element {
           (viewH - FIT_PADDING * 2) / contentH,
         ))
       );
-      targetFocalX = bounds.minX + contentW / 2;
-      targetFocalY = bounds.minY + contentH / 2;
+      const focal = getBoundsCenter(bounds);
+      targetFocalX = focal.x;
+      targetFocalY = focal.y;
     }
 
     // focal = world-space point at screen center: screen/zoom - cam
@@ -352,7 +397,7 @@ function App(): React.JSX.Element {
   useKeyboard({
     contextMenuRef, editingRef, selectedCardIds, cards, history,
     setContextMenu, saveSnapshot, deleteSelectedCards,
-    selectAllCards, applySnapshot, fitToContent, scheduleRedraw, markDirty,
+    selectAllCards, applySnapshot, fitToContent, copySelectedCards, pasteFromClipboard, scheduleRedraw, markDirty,
   });
 
   const {
@@ -362,7 +407,7 @@ function App(): React.JSX.Element {
   } = createMenuHandlers({
     contextMenu, selectedCardIds, clipboard,
     findCard, removeCard, deleteSelectedCards, createCard, insertCard, openEditor,
-    createAndStartEditingCardAt,
+    createAndStartEditingCardAt, copySelectedCards, pasteCardsAtPoint,
     saveSnapshot, setContextMenu, scheduleRedraw, markDirty,
   });
 
@@ -439,7 +484,7 @@ function App(): React.JSX.Element {
           ) : (
             <>
               <div
-                className={`context-menu-item${clipboard.current ? "" : " disabled"}`}
+                className={`context-menu-item${clipboard.current.length > 0 ? "" : " disabled"}`}
                 onClick={handleMenuPaste}
               >
                 Paste

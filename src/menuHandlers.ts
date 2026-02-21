@@ -7,7 +7,7 @@ import { runMutation } from "./mutation";
 export interface MenuHandlerDeps {
   contextMenu: ContextMenuState | null;
   selectedCardIds: React.RefObject<Set<string>>;
-  clipboard: React.RefObject<Card | null>;
+  clipboard: React.RefObject<Card[]>;
   findCard: (id: string) => Card | undefined;
   removeCard: (id: string) => void;
   deleteSelectedCards: () => void;
@@ -15,6 +15,8 @@ export interface MenuHandlerDeps {
   insertCard: (card: Card) => void;
   openEditor: (card: Card) => void;
   createAndStartEditingCardAt: (worldX: number, worldY: number) => void;
+  copySelectedCards: () => void;
+  pasteCardsAtPoint: (sources: Card[], worldX: number, worldY: number) => void;
   saveSnapshot: () => void;
   setContextMenu: (v: ContextMenuState | null) => void;
   scheduleRedraw: () => void;
@@ -65,9 +67,14 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
   }
 
   function handleMenuCopy(): void {
-    const card = getMenuCard(deps);
-    if (!card) return;
-    deps.clipboard.current = { ...card };
+    const cardId = deps.contextMenu?.cardId;
+    if (!cardId) return;
+    if (deps.selectedCardIds.current.has(cardId)) {
+      deps.copySelectedCards();
+    } else {
+      const card = deps.findCard(cardId);
+      if (card) deps.clipboard.current = [{ ...card }];
+    }
     closeMenu(deps);
   }
 
@@ -93,14 +100,10 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
   }
 
   function handleMenuPaste(): void {
-    if (!deps.contextMenu || !deps.clipboard.current) return;
+    if (!deps.contextMenu || deps.clipboard.current.length === 0) return;
     const { worldX, worldY } = deps.contextMenu;
-    const src = deps.clipboard.current;
-    runMenuAction(deps, () => {
-      const pos = snapPoint(worldX - src.width / 2, worldY - src.height / 2);
-      const newCard = deps.createCard(pos.x, pos.y, src.width, src.height, src.title, src.color);
-      deps.insertCard(newCard);
-    });
+    closeMenu(deps);
+    deps.pasteCardsAtPoint(deps.clipboard.current, worldX, worldY);
   }
 
   function handleMenuNewCard(): void {

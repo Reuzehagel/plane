@@ -68,6 +68,13 @@ export function getContentBounds(cards: Card[]): Bounds | null {
   return { minX, minY, maxX, maxY };
 }
 
+export function getBoundsCenter(bounds: Bounds): Point {
+  return {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+  };
+}
+
 export function isContentVisible(cards: Card[], cam: Camera, viewW: number, viewH: number): boolean {
   if (cards.length === 0) return true;
   const vx = -cam.x;
