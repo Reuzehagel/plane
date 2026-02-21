@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Frame, FrameSummary, Grid, GridSummary, History, Point, PresentationState, ResizeState, ResizeTarget, Snapshot } from "../types";
-import { screenToWorld, worldToScreen, snapPoint, getRectBounds, mergeBounds, getBoundsCenter, isContentVisible } from "../lib/geometry";
+import type { ActiveTool, BoxSelectState, Camera, Card, Connection, ConnectionDragState, ContextMenuState, DragState, EditingState, Frame, FrameSummary, Grid, GridSummary, History, Point, PresentationState, ResizeState, ResizeTarget, Snapshot } from "../types";
+import { screenToWorld, worldToScreen, snapPoint, getRectBounds, mergeBounds, getBoundsCenter, isContentVisible, getConnectionBezier, getBezierMidpoint } from "../lib/geometry";
 import { drawScene } from "../lib/rendering";
 import { pushSnapshot, undo, redo } from "../lib/history";
 import {
@@ -12,6 +12,7 @@ import {
   CAMERA_LERP, CAMERA_FOCAL_EPSILON, CAMERA_ZOOM_EPSILON, FIT_PADDING, SIDEBAR_WIDTH,
   FRAME_DEFAULT_WIDTH, FRAME_DEFAULT_HEIGHT, FRAME_LABEL_FONT_SIZE, FRAME_LABEL_OFFSET_Y,
   PRESENTATION_FIT_PADDING,
+  CONNECTION_DEFAULT_COLOR, CONNECTION_LABEL_FONT_SIZE, CONNECTION_LABEL_PAD,
 } from "../constants";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { useCanvasInteractions } from "../hooks/useCanvasInteractions";
@@ -22,6 +23,7 @@ import { computeCardHeight, wrapText } from "../lib/textLayout";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { PresentationOverlay } from "./PresentationOverlay";
+import { Toolbar } from "./Toolbar";
 import { LocateFixed } from "lucide-react";
 
 // Pairs useState with a ref that stays in sync, so imperative event handlers
@@ -84,6 +86,15 @@ function App(): React.JSX.Element {
   const [frameSummaries, setFrameSummaries] = useState<FrameSummary[]>([]);
   const frameLabelInputRef = useRef<HTMLInputElement>(null);
 
+  // Connection state
+  const connections = useRef<Connection[]>([]);
+  const selectedConnectionIds = useRef<Set<string>>(new Set());
+  const connectionDrag = useRef<ConnectionDragState | null>(null);
+  const [activeTool, activeToolRef, setActiveTool] = useRefState<ActiveTool>("pointer");
+  const connectionClipboard = useRef<Connection[]>([]);
+  const [editingConnectionLabel, editingConnectionLabelRef, setEditingConnectionLabel] = useRefState<string | null>(null);
+  const connectionLabelInputRef = useRef<HTMLInputElement>(null);
+
   function refreshGridSummaries(): void {
     setGridSummaries(grids.current.map((g) => ({
       id: g.id,
@@ -105,6 +116,7 @@ function App(): React.JSX.Element {
     if (grid) {
       grid.cards = cards.current;
       grid.frames = frames.current;
+      grid.connections = connections.current;
       grid.camera = { ...camera.current };
     }
   }
@@ -124,6 +136,9 @@ function App(): React.JSX.Element {
       presentingNow ? [] : frames.current,
       presentingNow ? new Set() : selectedFrameIds.current,
       editingFrameLabelRef.current,
+      connections.current,
+      presentingNow ? new Set() : selectedConnectionIds.current,
+      connectionDrag.current,
     );
     setContentOffscreen(!isContentVisible(cards.current, camera.current, w, h));
   }, []);
@@ -147,6 +162,7 @@ function App(): React.JSX.Element {
       const activeGrid = data.grids.find((g) => g.id === data.activeGridId) ?? data.grids[0];
       cards.current = activeGrid.cards;
       frames.current = activeGrid.frames ?? [];
+      connections.current = activeGrid.connections ?? [];
       camera.current = { ...activeGrid.camera };
       isLoaded.current = true;
       refreshGridSummaries();
@@ -166,7 +182,7 @@ function App(): React.JSX.Element {
   }, [fontsReady, scheduleRedraw]);
 
   function saveSnapshot(): void {
-    pushSnapshot(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current);
+    pushSnapshot(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current, connections.current, selectedConnectionIds.current);
   }
 
   function applySnapshot(snapshot: Snapshot): void {
@@ -174,6 +190,8 @@ function App(): React.JSX.Element {
     selectedCardIds.current = snapshot.selectedCardIds;
     frames.current = snapshot.frames;
     selectedFrameIds.current = snapshot.selectedFrameIds;
+    connections.current = snapshot.connections;
+    selectedConnectionIds.current = snapshot.selectedConnectionIds;
     refreshFrameSummaries();
     scheduleRedraw();
     markDirty();
@@ -190,9 +208,16 @@ function App(): React.JSX.Element {
     }, 2000);
   }
 
+  function removeConnectionsForCard(cardId: string): void {
+    connections.current = connections.current.filter(
+      (c) => c.fromCardId !== cardId && c.toCardId !== cardId,
+    );
+  }
+
   function removeCard(cardId: string): void {
     cards.current = cards.current.filter((c) => c.id !== cardId);
     selectedCardIds.current.delete(cardId);
+    removeConnectionsForCard(cardId);
   }
 
   function createCard(x: number, y: number, width: number, height: number, text: string, color?: string): Card {
@@ -211,6 +236,9 @@ function App(): React.JSX.Element {
   }
 
   function deleteSelectedCards(): void {
+    for (const id of selectedCardIds.current) {
+      removeConnectionsForCard(id);
+    }
     cards.current = cards.current.filter((card) => !selectedCardIds.current.has(card.id));
     selectedCardIds.current.clear();
   }
@@ -254,6 +282,77 @@ function App(): React.JSX.Element {
     frames.current = frames.current.filter((f) => !selectedFrameIds.current.has(f.id));
     selectedFrameIds.current.clear();
     refreshFrameSummaries();
+  }
+
+  // Connection CRUD
+  function createConnection(fromCardId: string, toCardId: string, fromAnchor: Connection["fromAnchor"], toAnchor: Connection["toAnchor"], color?: string): Connection {
+    return {
+      id: crypto.randomUUID(),
+      fromCardId, toCardId, fromAnchor, toAnchor,
+      color: color ?? CONNECTION_DEFAULT_COLOR,
+    };
+  }
+
+  function insertConnection(conn: Connection): void {
+    connections.current.push(conn);
+    selectedConnectionIds.current.clear();
+    selectedConnectionIds.current.add(conn.id);
+    selectedCardIds.current.clear();
+    selectedFrameIds.current.clear();
+  }
+
+  function removeConnection(id: string): void {
+    connections.current = connections.current.filter((c) => c.id !== id);
+    selectedConnectionIds.current.delete(id);
+  }
+
+  function findConnection(id: string): Connection | undefined {
+    return connections.current.find((c) => c.id === id);
+  }
+
+  function deleteSelectedConnections(): void {
+    connections.current = connections.current.filter((c) => !selectedConnectionIds.current.has(c.id));
+    selectedConnectionIds.current.clear();
+  }
+
+  function connectionExists(fromCardId: string, toCardId: string): boolean {
+    return connections.current.some(
+      (c) => (c.fromCardId === fromCardId && c.toCardId === toCardId) ||
+             (c.fromCardId === toCardId && c.toCardId === fromCardId),
+    );
+  }
+
+  function startEditingConnectionLabel(conn: Connection): void {
+    selectedConnectionIds.current.clear();
+    selectedConnectionIds.current.add(conn.id);
+    setEditingConnectionLabel(conn.id);
+    scheduleRedraw();
+    requestAnimationFrame(() => {
+      connectionLabelInputRef.current?.focus({ preventScroll: true });
+      connectionLabelInputRef.current?.select();
+    });
+  }
+
+  function commitConnectionLabelEdit(): void {
+    const connId = editingConnectionLabelRef.current;
+    if (!connId) return;
+    const conn = findConnection(connId);
+    const input = connectionLabelInputRef.current;
+    if (conn && input) {
+      const newLabel = input.value.trim();
+      if (newLabel !== (conn.label ?? "")) {
+        saveSnapshot();
+        conn.label = newLabel || undefined;
+        markDirty();
+      }
+    }
+    setEditingConnectionLabel(null);
+    scheduleRedraw();
+  }
+
+  function cancelConnectionLabelEdit(): void {
+    setEditingConnectionLabel(null);
+    scheduleRedraw();
   }
 
   function openEditor(card: Card): void {
@@ -300,6 +399,9 @@ function App(): React.JSX.Element {
     clipboard.current = cards.current
       .filter((c) => selectedCardIds.current.has(c.id))
       .map((c) => ({ ...c }));
+    connectionClipboard.current = connections.current
+      .filter((c) => selectedCardIds.current.has(c.fromCardId) && selectedCardIds.current.has(c.toCardId))
+      .map((c) => ({ ...c }));
     frameClipboard.current = [];
   }
 
@@ -338,11 +440,22 @@ function App(): React.JSX.Element {
     const dy = worldY - center.y;
     runMutation({ saveSnapshot, scheduleRedraw, markDirty }, () => {
       selectedCardIds.current.clear();
+      const idMap = new Map<string, string>();
       for (const s of sources) {
         const pos = snapPoint(s.x + dx, s.y + dy);
         const newCard = createCard(pos.x, pos.y, s.width, s.height, s.text, s.color);
+        idMap.set(s.id, newCard.id);
         cards.current.push(newCard);
         selectedCardIds.current.add(newCard.id);
+      }
+      for (const conn of connectionClipboard.current) {
+        const newFromId = idMap.get(conn.fromCardId);
+        const newToId = idMap.get(conn.toCardId);
+        if (newFromId && newToId) {
+          const newConn = createConnection(newFromId, newToId, conn.fromAnchor, conn.toAnchor, conn.color);
+          newConn.label = conn.label;
+          connections.current.push(newConn);
+        }
       }
     });
   }
@@ -584,12 +697,12 @@ function App(): React.JSX.Element {
       case "fit":         fitToContent(); break;
       case "select-all":  selectAllCards(); scheduleRedraw(); break;
       case "undo": {
-        const snapshot = undo(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current);
+        const snapshot = undo(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current, connections.current, selectedConnectionIds.current);
         if (snapshot) applySnapshot(snapshot);
         break;
       }
       case "redo": {
-        const snapshot = redo(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current);
+        const snapshot = redo(history.current, cards.current, selectedCardIds.current, frames.current, selectedFrameIds.current, connections.current, selectedConnectionIds.current);
         if (snapshot) applySnapshot(snapshot);
         break;
       }
@@ -645,9 +758,11 @@ function App(): React.JSX.Element {
   function activateGrid(grid: Grid): void {
     cards.current = grid.cards;
     frames.current = grid.frames ?? [];
+    connections.current = grid.connections ?? [];
     camera.current = { ...grid.camera };
     selectedCardIds.current.clear();
     selectedFrameIds.current.clear();
+    selectedConnectionIds.current.clear();
     history.current = { undoStack: [], redoStack: [] };
     setActiveGridId(grid.id);
     refreshGridSummaries();
@@ -666,7 +781,7 @@ function App(): React.JSX.Element {
   function createGrid(): void {
     syncCurrentGridBack();
     const name = `Grid ${grids.current.length + 1}`;
-    const grid: Grid = { id: crypto.randomUUID(), name, cards: [], frames: [], camera: { x: 0, y: 0, zoom: 1 } };
+    const grid: Grid = { id: crypto.randomUUID(), name, cards: [], frames: [], connections: [], camera: { x: 0, y: 0, zoom: 1 } };
     grids.current.push(grid);
     activateGrid(grid);
   }
@@ -724,9 +839,13 @@ function App(): React.JSX.Element {
     dragSnapTargets, dragRafId, resizeTarget, resizeRafId,
     spaceHeld, editingRef, contextMenuRef, cardScrollOffsets,
     frames, selectedFrameIds, presentingRef,
+    connections, selectedConnectionIds, activeToolRef, connectionDrag,
+    editingConnectionLabelRef, setActiveTool,
     draw, scheduleRedraw, saveSnapshot, markDirty,
     selectCard, openEditor, createAndStartEditingCardAt, setContextMenu,
     syncEditorPosition, getCardMaxScroll, startEditingFrameLabel,
+    createConnection, insertConnection, connectionExists,
+    startEditingConnectionLabel,
   });
 
   useEffect(() => {
@@ -804,7 +923,10 @@ function App(): React.JSX.Element {
   useKeyboard({
     contextMenuRef, editingRef, paletteOpenRef, selectedCardIds, cards, history,
     frames, selectedFrameIds, presentingRef, editingFrameLabelRef,
+    connections, selectedConnectionIds, editingConnectionLabelRef,
+    activeToolRef, setActiveTool,
     setContextMenu, saveSnapshot, deleteSelectedCards, deleteSelectedFrames,
+    deleteSelectedConnections,
     selectAllCards, applySnapshot, fitToContent, copySelectedCards, copySelectedFrames,
     pasteFromClipboard,
     togglePalette, startPresentation, presentNext, presentPrev, exitPresentation,
@@ -816,6 +938,7 @@ function App(): React.JSX.Element {
     handleMenuResetSize, handleMenuDelete, handleMenuPaste, handleMenuNewCard,
     handleMenuChangeColor, handleMenuNewFrame, handleMenuRenameFrame, handleMenuDeleteFrame,
     handleMenuDuplicateFrame, handleMenuCopyFrame,
+    handleMenuDeleteConnection, handleMenuChangeConnectionColor, handleMenuEditConnectionLabel,
   } = createMenuHandlers({
     contextMenu, selectedCardIds, clipboard, frameClipboard,
     findCard, removeCard, deleteSelectedCards, createCard, insertCard, openEditor,
@@ -823,6 +946,8 @@ function App(): React.JSX.Element {
     recalculateCardHeight, saveSnapshot, setContextMenu, scheduleRedraw, markDirty,
     frames, createFrame, insertFrame, removeFrame, findFrame, selectedFrameIds,
     startEditingFrameLabel, deleteSelectedFrames, copySelectedFrames, pasteFramesAtPoint,
+    connections, selectedConnectionIds, findConnection, removeConnection,
+    deleteSelectedConnections, startEditingConnectionLabel,
   });
 
   const editingCard = editing ? findCard(editing.cardId) : null;
@@ -878,6 +1003,9 @@ function App(): React.JSX.Element {
         >
           <LocateFixed size={16} strokeWidth={1.8} />
         </button>
+      )}
+      {!presenting && (
+        <Toolbar activeTool={activeTool} onToolChange={setActiveTool} />
       )}
       <canvas ref={canvasRef} />
       {editing && !presenting && (() => {
@@ -1035,6 +1163,38 @@ function App(): React.JSX.Element {
           }}
         />
       )}
+      {editingConnectionLabel && (() => {
+        const conn = findConnection(editingConnectionLabel);
+        if (!conn) return null;
+        const fromCard = findCard(conn.fromCardId);
+        const toCard = findCard(conn.toCardId);
+        if (!fromCard || !toCard) return null;
+        const bezier = getConnectionBezier(fromCard, conn.fromAnchor, toCard, conn.toAnchor);
+        const mid = getBezierMidpoint(bezier);
+        const sMid = worldToScreen(mid.x, mid.y, camera.current);
+        const zoom = camera.current.zoom;
+        const fontSize = CONNECTION_LABEL_FONT_SIZE * Math.min(zoom, 1.5);
+        return (
+          <input
+            ref={connectionLabelInputRef}
+            className="connection-label-editor"
+            style={{
+              left: sMid.x - 60,
+              top: sMid.y - fontSize / 2 - CONNECTION_LABEL_PAD,
+              width: 120,
+              fontSize,
+              padding: `${CONNECTION_LABEL_PAD}px`,
+            }}
+            defaultValue={conn.label ?? ""}
+            onBlur={commitConnectionLabelEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitConnectionLabelEdit();
+              else if (e.key === "Escape") cancelConnectionLabelEdit();
+              e.stopPropagation();
+            }}
+          />
+        );
+      })()}
       {contextMenu && !presenting && (
         <div
           className="context-menu"
@@ -1059,6 +1219,23 @@ function App(): React.JSX.Element {
               </div>
               <div className="context-menu-separator" />
               <div className="context-menu-item" onClick={handleMenuDelete}>Delete</div>
+            </>
+          ) : contextMenu.connectionId ? (
+            <>
+              <div className="context-menu-item" onClick={handleMenuEditConnectionLabel}>Edit Label</div>
+              <div className="context-menu-separator" />
+              <div className="context-menu-colors">
+                {CARD_COLORS.map((color) => (
+                  <div
+                    key={color}
+                    className={`context-menu-color-dot${findConnection(contextMenu.connectionId!)?.color === color ? " active" : ""}`}
+                    style={{ background: color }}
+                    onClick={() => handleMenuChangeConnectionColor(color)}
+                  />
+                ))}
+              </div>
+              <div className="context-menu-separator" />
+              <div className="context-menu-item" onClick={handleMenuDeleteConnection}>Delete</div>
             </>
           ) : contextMenu.frameId ? (
             <>

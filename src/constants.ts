@@ -75,3 +75,26 @@ export const FRAME_LABEL_COLOR = "rgba(90, 138, 255, 0.5)";
 export const FRAME_LABEL_FONT_SIZE = 12;
 export const FRAME_LABEL_OFFSET_Y = -8;
 export const PRESENTATION_FIT_PADDING = 48;
+
+// Connection anchor dots
+export const ANCHOR_DOT_RADIUS = 5;
+export const ANCHOR_DOT_HIT_RADIUS = 16;
+export const ANCHOR_DOT_COLOR = "#5a8aff";
+export const ANCHOR_DOT_HOVER_COLOR = "#7fa8ff";
+
+// Connection lines
+export const CONNECTION_LINE_WIDTH = 2;
+export const CONNECTION_SELECTED_LINE_WIDTH = 3;
+export const CONNECTION_HIT_TOLERANCE = 12;
+export const CONNECTION_ARROW_SIZE = 10;
+export const CONNECTION_BEZIER_OFFSET = 60;
+export const CONNECTION_DEFAULT_COLOR = "#5a8aff"; // TODO: wire to settings when settings UI exists
+
+// Connection rubber band (in-progress drag)
+export const CONNECTION_RUBBERBAND_DASH = [6, 4];
+export const CONNECTION_RUBBERBAND_COLOR = "rgba(90, 138, 255, 0.5)";
+
+// Connection label
+export const CONNECTION_LABEL_FONT_SIZE = 12;
+export const CONNECTION_LABEL_BG = "#1a1a1a";
+export const CONNECTION_LABEL_PAD = 4;

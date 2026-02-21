@@ -1,5 +1,5 @@
-import type { BoxSelectState, Camera, Card, Frame } from "../types";
-import { worldToScreen, getCardCorners } from "./geometry";
+import type { BoxSelectState, Camera, Card, Connection, ConnectionDragState, Frame } from "../types";
+import { worldToScreen, getCardCorners, getAnchorPoint, getConnectionBezier, getBezierMidpoint, getBezierPointFromAnchor } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
   CARD_RADIUS, CARD_BG, CARD_BORDER,
@@ -9,6 +9,10 @@ import {
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
   FRAME_BORDER_COLOR, FRAME_SELECTED_BORDER, FRAME_FILL,
   FRAME_LABEL_COLOR, FRAME_LABEL_FONT_SIZE, FRAME_LABEL_OFFSET_Y,
+  ANCHOR_DOT_RADIUS, ANCHOR_DOT_COLOR, ANCHOR_DOT_HOVER_COLOR,
+  CONNECTION_LINE_WIDTH, CONNECTION_SELECTED_LINE_WIDTH, CONNECTION_ARROW_SIZE,
+  CONNECTION_RUBBERBAND_DASH, CONNECTION_RUBBERBAND_COLOR,
+  CONNECTION_LABEL_FONT_SIZE, CONNECTION_LABEL_BG, CONNECTION_LABEL_PAD,
 } from "../constants";
 import { wrapText } from "./textLayout";
 
@@ -43,6 +47,35 @@ interface ScreenRect {
   sh: number;
 }
 
+function drawArrowhead(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string, size: number): void {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - size * Math.cos(angle - Math.PI / 6), toY - size * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(toX - size * Math.cos(angle + Math.PI / 6), toY - size * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawConnectionLabel(ctx: CanvasRenderingContext2D, label: string, midX: number, midY: number, zoom: number): void {
+  const fontSize = CONNECTION_LABEL_FONT_SIZE * Math.min(zoom, 1.5);
+  ctx.font = `${fontSize}px ${CARD_TITLE_FONT}`;
+  const metrics = ctx.measureText(label);
+  const pad = CONNECTION_LABEL_PAD * zoom;
+  const w = metrics.width + pad * 2;
+  const h = fontSize + pad * 2;
+  const rx = midX - w / 2;
+  const ry = midY - h / 2;
+  ctx.fillStyle = CONNECTION_LABEL_BG;
+  ctx.fill(roundRectPath(rx, ry, w, h, 3 * zoom));
+  ctx.fillStyle = "#d0d0d0";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.fillText(label, midX, midY);
+  ctx.textAlign = "left";
+}
+
 export function drawScene(
   ctx: CanvasRenderingContext2D,
   dpr: number,
@@ -57,6 +90,9 @@ export function drawScene(
   frames: Frame[] = [],
   selectedFrameIds: Set<string> = new Set(),
   editingFrameId: string | null = null,
+  connections: Connection[] = [],
+  selectedConnectionIds: Set<string> = new Set(),
+  connectionDrag: ConnectionDragState | null = null,
 ): void {
   const { x: camX, y: camY, zoom } = camera;
 
@@ -129,6 +165,85 @@ export function drawScene(
     ctx.textAlign = "center";
     ctx.fillText(String(frame.order), badgeX + badgeSize / 2, badgeY + badgeSize / 2);
     ctx.textAlign = "left";
+  }
+
+  // Draw connections
+  const cardMap = new Map(cards.map((c) => [c.id, c]));
+  for (const conn of connections) {
+    const fromCard = cardMap.get(conn.fromCardId);
+    const toCard = cardMap.get(conn.toCardId);
+    if (!fromCard || !toCard) continue;
+    const bezier = getConnectionBezier(fromCard, conn.fromAnchor, toCard, conn.toAnchor);
+    const sp0 = worldToScreen(bezier.p0.x, bezier.p0.y, camera);
+    const scp1 = worldToScreen(bezier.cp1.x, bezier.cp1.y, camera);
+    const scp2 = worldToScreen(bezier.cp2.x, bezier.cp2.y, camera);
+    const sp3 = worldToScreen(bezier.p3.x, bezier.p3.y, camera);
+    const selected = selectedConnectionIds.has(conn.id);
+
+    if (selected) {
+      ctx.strokeStyle = conn.color + "33";
+      ctx.lineWidth = (CONNECTION_SELECTED_LINE_WIDTH + 4) * zoom;
+      ctx.beginPath();
+      ctx.moveTo(sp0.x, sp0.y);
+      ctx.bezierCurveTo(scp1.x, scp1.y, scp2.x, scp2.y, sp3.x, sp3.y);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = conn.color;
+    ctx.lineWidth = (selected ? CONNECTION_SELECTED_LINE_WIDTH : CONNECTION_LINE_WIDTH) * zoom;
+    ctx.beginPath();
+    ctx.moveTo(sp0.x, sp0.y);
+    ctx.bezierCurveTo(scp1.x, scp1.y, scp2.x, scp2.y, sp3.x, sp3.y);
+    ctx.stroke();
+
+    // Arrowhead — direction from cp2 → p3
+    drawArrowhead(ctx, scp2.x, scp2.y, sp3.x, sp3.y, conn.color, CONNECTION_ARROW_SIZE * zoom);
+
+    // Label
+    if (conn.label) {
+      const mid = getBezierMidpoint(bezier);
+      const sMid = worldToScreen(mid.x, mid.y, camera);
+      drawConnectionLabel(ctx, conn.label, sMid.x, sMid.y, zoom);
+    }
+  }
+
+  // Rubber-band line during connection drag
+  if (connectionDrag) {
+    const fromCard = cardMap.get(connectionDrag.fromCardId);
+    if (fromCard) {
+      const snapped = connectionDrag.snapTarget;
+      if (snapped) {
+        const targetCard = cardMap.get(snapped.cardId);
+        if (targetCard) {
+          const bezier = getConnectionBezier(fromCard, connectionDrag.fromAnchor, targetCard, snapped.anchor);
+          const sp0 = worldToScreen(bezier.p0.x, bezier.p0.y, camera);
+          const scp1 = worldToScreen(bezier.cp1.x, bezier.cp1.y, camera);
+          const scp2 = worldToScreen(bezier.cp2.x, bezier.cp2.y, camera);
+          const sp3 = worldToScreen(bezier.p3.x, bezier.p3.y, camera);
+          ctx.strokeStyle = ANCHOR_DOT_COLOR;
+          ctx.lineWidth = CONNECTION_LINE_WIDTH * zoom;
+          ctx.beginPath();
+          ctx.moveTo(sp0.x, sp0.y);
+          ctx.bezierCurveTo(scp1.x, scp1.y, scp2.x, scp2.y, sp3.x, sp3.y);
+          ctx.stroke();
+          drawArrowhead(ctx, scp2.x, scp2.y, sp3.x, sp3.y, ANCHOR_DOT_COLOR, CONNECTION_ARROW_SIZE * zoom);
+        }
+      } else {
+        const bezier = getBezierPointFromAnchor(fromCard, connectionDrag.fromAnchor, connectionDrag.currentWorld);
+        const sp0 = worldToScreen(bezier.p0.x, bezier.p0.y, camera);
+        const scp1 = worldToScreen(bezier.cp1.x, bezier.cp1.y, camera);
+        const sTarget = worldToScreen(connectionDrag.currentWorld.x, connectionDrag.currentWorld.y, camera);
+        ctx.save();
+        ctx.setLineDash(CONNECTION_RUBBERBAND_DASH.map((v) => v * zoom));
+        ctx.strokeStyle = CONNECTION_RUBBERBAND_COLOR;
+        ctx.lineWidth = CONNECTION_LINE_WIDTH * zoom;
+        ctx.beginPath();
+        ctx.moveTo(sp0.x, sp0.y);
+        ctx.bezierCurveTo(scp1.x, scp1.y, sTarget.x, sTarget.y, sTarget.x, sTarget.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
   }
 
   const sr = CARD_RADIUS * zoom;
@@ -284,6 +399,23 @@ export function drawScene(
       const hy = cy - HALF_HANDLE;
       ctx.fillRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);
       ctx.strokeRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);
+    }
+  }
+
+  // Anchor dot highlight on snap target during drag
+  if (connectionDrag?.snapTarget) {
+    const targetCard = cardMap.get(connectionDrag.snapTarget.cardId);
+    if (targetCard) {
+      const pt = getAnchorPoint(targetCard, connectionDrag.snapTarget.anchor);
+      const spt = worldToScreen(pt.x, pt.y, camera);
+      const r = (ANCHOR_DOT_RADIUS + 2) * Math.min(zoom, 1.5);
+      ctx.fillStyle = ANCHOR_DOT_HOVER_COLOR;
+      ctx.beginPath();
+      ctx.arc(spt.x, spt.y, r, 0, TWO_PI);
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 

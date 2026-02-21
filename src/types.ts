@@ -65,6 +65,8 @@ export interface Snapshot {
   selectedCardIds: Set<string>;
   frames: Frame[];
   selectedFrameIds: Set<string>;
+  connections: Connection[];
+  selectedConnectionIds: Set<string>;
 }
 
 export interface History {
@@ -79,6 +81,26 @@ export interface ContextMenuState {
   worldY: number;
   cardId: string | null;
   frameId: string | null;
+  connectionId: string | null;
+}
+
+export type AnchorPosition = "top" | "bottom" | "left" | "right";
+
+export interface Connection {
+  id: string;
+  fromCardId: string;
+  toCardId: string;
+  fromAnchor: AnchorPosition;
+  toAnchor: AnchorPosition;
+  color: string;
+  label?: string;
+}
+
+export interface ConnectionDragState {
+  fromCardId: string;
+  fromAnchor: AnchorPosition;
+  currentWorld: Point;
+  snapTarget: { cardId: string; anchor: AnchorPosition } | null;
 }
 
 export type HandleCorner = "nw" | "ne" | "sw" | "se";
@@ -110,6 +132,7 @@ export interface Grid {
   name: string;
   cards: Card[];
   frames: Frame[];
+  connections: Connection[];
   camera: Camera;
 }
 
@@ -154,3 +177,5 @@ export interface PaletteFrameItem {
 }
 
 export type PaletteItem = PaletteActionItem | PaletteGridItem | PaletteCardItem | PaletteFrameItem;
+
+export type ActiveTool = "pointer" | "connection";

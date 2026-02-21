@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { Card, ContextMenuState, EditingState, Frame, History, PresentationState, Snapshot } from "../types";
+import type { ActiveTool, Card, Connection, ContextMenuState, EditingState, Frame, History, PresentationState, Snapshot } from "../types";
 import { undo, redo } from "../lib/history";
 import { NUDGE_AMOUNT } from "../constants";
 import { snapToGrid } from "../lib/geometry";
@@ -23,10 +23,16 @@ export interface KeyboardDeps {
   selectedFrameIds: React.RefObject<Set<string>>;
   presentingRef: React.RefObject<PresentationState | null>;
   editingFrameLabelRef: React.RefObject<string | null>;
+  connections: React.RefObject<Connection[]>;
+  selectedConnectionIds: React.RefObject<Set<string>>;
+  editingConnectionLabelRef: React.RefObject<string | null>;
+  activeToolRef: React.RefObject<ActiveTool>;
+  setActiveTool: (tool: ActiveTool) => void;
   setContextMenu: (v: ContextMenuState | null) => void;
   saveSnapshot: () => void;
   deleteSelectedCards: () => void;
   deleteSelectedFrames: () => void;
+  deleteSelectedConnections: () => void;
   selectAllCards: () => void;
   applySnapshot: (s: Snapshot) => void;
   fitToContent: () => void;
@@ -70,7 +76,14 @@ export function useKeyboard(deps: KeyboardDeps): void {
       }
       if (d.editingRef.current) return;
       if (d.editingFrameLabelRef.current) return;
+      if (d.editingConnectionLabelRef.current) return;
       if (d.paletteOpenRef.current) return;
+
+      if (e.key === "c" && !mod) {
+        d.setActiveTool(d.activeToolRef.current === "connection" ? "pointer" : "connection");
+        e.preventDefault();
+        return;
+      }
 
       if (e.key === "F5") {
         d.startPresentation();
@@ -79,10 +92,11 @@ export function useKeyboard(deps: KeyboardDeps): void {
       }
 
       if ((e.key === "Delete" || e.key === "Backspace")) {
-        if (d.selectedCardIds.current.size > 0 || d.selectedFrameIds.current.size > 0) {
+        if (d.selectedCardIds.current.size > 0 || d.selectedFrameIds.current.size > 0 || d.selectedConnectionIds.current.size > 0) {
           runMutation(d, () => {
             if (d.selectedCardIds.current.size > 0) d.deleteSelectedCards();
             if (d.selectedFrameIds.current.size > 0) d.deleteSelectedFrames();
+            if (d.selectedConnectionIds.current.size > 0) d.deleteSelectedConnections();
           });
           return;
         }
@@ -96,14 +110,14 @@ export function useKeyboard(deps: KeyboardDeps): void {
       }
 
       if (e.key === "z" && mod && !e.shiftKey) {
-        const snapshot = undo(d.history.current, d.cards.current, d.selectedCardIds.current, d.frames.current, d.selectedFrameIds.current);
+        const snapshot = undo(d.history.current, d.cards.current, d.selectedCardIds.current, d.frames.current, d.selectedFrameIds.current, d.connections.current, d.selectedConnectionIds.current);
         if (snapshot) d.applySnapshot(snapshot);
         e.preventDefault();
         return;
       }
 
       if ((e.key === "z" && mod && e.shiftKey) || (e.key === "y" && mod)) {
-        const snapshot = redo(d.history.current, d.cards.current, d.selectedCardIds.current, d.frames.current, d.selectedFrameIds.current);
+        const snapshot = redo(d.history.current, d.cards.current, d.selectedCardIds.current, d.frames.current, d.selectedFrameIds.current, d.connections.current, d.selectedConnectionIds.current);
         if (snapshot) d.applySnapshot(snapshot);
         e.preventDefault();
         return;

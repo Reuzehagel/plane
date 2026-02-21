@@ -41,8 +41,8 @@
 
 ## Connections
 
-- [ ] Draw arrows/lines between cards
-- [ ] Connection labels
+- [x] Draw arrows/lines between cards
+- [x] Connection labels
 - [ ] Auto-routing around cards
 
 ## Canvas & Navigation

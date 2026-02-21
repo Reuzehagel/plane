@@ -1,4 +1,4 @@
-import type { Card, Frame, Grid } from "../types";
+import type { Card, Connection, Frame, Grid } from "../types";
 import { DEFAULT_CARD_COLOR } from "../constants";
 
 export interface WorkspaceData {
@@ -46,7 +46,20 @@ interface WorkspaceFileV4 {
   activeGridId: string;
 }
 
-type WorkspaceFile = WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3 | WorkspaceFileV4;
+interface WorkspaceFileV5 {
+  version: 5;
+  grids: Array<{
+    id: string;
+    name: string;
+    cards: Array<Card & { color?: string }>;
+    frames: Frame[];
+    connections: Connection[];
+    camera: { x: number; y: number; zoom: number };
+  }>;
+  activeGridId: string;
+}
+
+type WorkspaceFile = WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3 | WorkspaceFileV4 | WorkspaceFileV5;
 
 const DIR = "com.nick.plane";
 const FILE = `${DIR}/workspace.json`;
@@ -61,7 +74,7 @@ function backfillCardColors(cards: Array<Card & { color?: string }>): Card[] {
 function defaultWorkspace(): WorkspaceData {
   const id = crypto.randomUUID();
   return {
-    grids: [{ id, name: "Grid 1", cards: [], frames: [], camera: { x: 0, y: 0, zoom: 1 } }],
+    grids: [{ id, name: "Grid 1", cards: [], frames: [], connections: [], camera: { x: 0, y: 0, zoom: 1 } }],
     activeGridId: id,
   };
 }
@@ -74,6 +87,7 @@ function migrateV1(data: WorkspaceFileV1): WorkspaceData {
       name: "Grid 1",
       cards: backfillCardColors(data.cards ?? []),
       frames: [],
+      connections: [],
       camera: data.camera ?? { x: 0, y: 0, zoom: 1 },
     }],
     activeGridId: id,
@@ -89,6 +103,7 @@ function migrateV2(data: WorkspaceFileV2): WorkspaceData {
         text: c.title ?? c.text ?? "",
       }))),
       frames: [],
+      connections: [],
     })),
     activeGridId: data.activeGridId,
   };
@@ -100,17 +115,31 @@ function migrateV3(data: WorkspaceFileV3): WorkspaceData {
       ...g,
       cards: backfillCardColors(g.cards),
       frames: [],
+      connections: [],
     })),
     activeGridId: data.activeGridId,
   };
 }
 
-function parseV4(data: WorkspaceFileV4): WorkspaceData {
+function migrateV4(data: WorkspaceFileV4): WorkspaceData {
   return {
     grids: data.grids.map((g) => ({
       ...g,
       cards: backfillCardColors(g.cards),
       frames: g.frames ?? [],
+      connections: [],
+    })),
+    activeGridId: data.activeGridId,
+  };
+}
+
+function parseV5(data: WorkspaceFileV5): WorkspaceData {
+  return {
+    grids: data.grids.map((g) => ({
+      ...g,
+      cards: backfillCardColors(g.cards),
+      frames: g.frames ?? [],
+      connections: g.connections ?? [],
     })),
     activeGridId: data.activeGridId,
   };
@@ -125,7 +154,8 @@ export async function loadWorkspace(): Promise<WorkspaceData> {
     const data: WorkspaceFile = JSON.parse(raw);
 
     switch (data.version) {
-      case 4: return parseV4(data);
+      case 5: return parseV5(data);
+      case 4: return migrateV4(data);
       case 3: return migrateV3(data);
       case 2: return migrateV2(data);
       case 1: return migrateV1(data);
@@ -140,13 +170,14 @@ export async function loadWorkspace(): Promise<WorkspaceData> {
 export async function saveWorkspace(grids: Grid[], activeGridId: string): Promise<void> {
   try {
     await window.electronAPI.mkdir(DIR);
-    const data: WorkspaceFileV4 = {
-      version: 4,
-      grids: grids.map(({ id, name, cards, frames, camera }) => ({
+    const data: WorkspaceFileV5 = {
+      version: 5,
+      grids: grids.map(({ id, name, cards, frames, connections, camera }) => ({
         id,
         name,
         cards,
         frames,
+        connections,
         camera: { ...camera },
       })),
       activeGridId,

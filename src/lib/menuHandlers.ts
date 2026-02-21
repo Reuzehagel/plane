@@ -1,5 +1,5 @@
 import type React from "react";
-import type { Card, ContextMenuState, Frame } from "../types";
+import type { Card, Connection, ContextMenuState, Frame } from "../types";
 import { CARD_WIDTH, DUPLICATE_OFFSET, FRAME_DEFAULT_WIDTH, FRAME_DEFAULT_HEIGHT } from "../constants";
 import { snapPoint } from "./geometry";
 import { runMutation } from "./mutation";
@@ -33,6 +33,12 @@ export interface MenuHandlerDeps {
   deleteSelectedFrames: () => void;
   copySelectedFrames: () => void;
   pasteFramesAtPoint: (sources: Frame[], worldX: number, worldY: number) => void;
+  connections: React.RefObject<Connection[]>;
+  selectedConnectionIds: React.RefObject<Set<string>>;
+  findConnection: (id: string) => Connection | undefined;
+  removeConnection: (id: string) => void;
+  deleteSelectedConnections: () => void;
+  startEditingConnectionLabel: (conn: Connection) => void;
 }
 
 export interface MenuHandlers {
@@ -49,6 +55,9 @@ export interface MenuHandlers {
   handleMenuDeleteFrame: () => void;
   handleMenuDuplicateFrame: () => void;
   handleMenuCopyFrame: () => void;
+  handleMenuDeleteConnection: () => void;
+  handleMenuChangeConnectionColor: (color: string) => void;
+  handleMenuEditConnectionLabel: () => void;
 }
 
 function getMenuCard(deps: MenuHandlerDeps): Card | undefined {
@@ -206,6 +215,44 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     closeMenu(deps);
   }
 
+  function handleMenuDeleteConnection(): void {
+    const connId = deps.contextMenu?.connectionId;
+    if (!connId) return;
+    runMenuAction(deps, () => {
+      if (deps.selectedConnectionIds.current.has(connId)) {
+        deps.deleteSelectedConnections();
+      } else {
+        deps.removeConnection(connId);
+      }
+    });
+  }
+
+  function handleMenuChangeConnectionColor(color: string): void {
+    const connId = deps.contextMenu?.connectionId;
+    if (!connId) return;
+    runMenuAction(deps, () => {
+      if (deps.selectedConnectionIds.current.size > 0) {
+        for (const conn of deps.connections.current) {
+          if (deps.selectedConnectionIds.current.has(conn.id)) {
+            conn.color = color;
+          }
+        }
+      } else {
+        const conn = deps.findConnection(connId);
+        if (conn) conn.color = color;
+      }
+    });
+  }
+
+  function handleMenuEditConnectionLabel(): void {
+    const connId = deps.contextMenu?.connectionId;
+    if (!connId) return;
+    const conn = deps.findConnection(connId);
+    if (!conn) return;
+    closeMenu(deps);
+    deps.startEditingConnectionLabel(conn);
+  }
+
   return {
     handleMenuEdit,
     handleMenuDuplicate,
@@ -220,5 +267,8 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     handleMenuDeleteFrame,
     handleMenuDuplicateFrame,
     handleMenuCopyFrame,
+    handleMenuDeleteConnection,
+    handleMenuChangeConnectionColor,
+    handleMenuEditConnectionLabel,
   };
 }

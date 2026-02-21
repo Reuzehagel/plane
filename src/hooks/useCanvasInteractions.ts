@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Frame, HandleCorner, Point, PresentationState, ResizeState, ResizeTarget } from "../types";
-import { mouseToScreen, mouseToWorld, hitTestCards, hitTestRectHandles, hitTestFrames, snapToGrid, snapPoint, lerpSnap, rectsIntersect, getCardsInFrame } from "../lib/geometry";
+import type { ActiveTool, BoxSelectState, Camera, Card, Connection, ConnectionDragState, ContextMenuState, DragState, EditingState, Frame, HandleCorner, Point, PresentationState, ResizeState, ResizeTarget } from "../types";
+import { mouseToScreen, mouseToWorld, hitTestCards, hitTestRectHandles, hitTestFrames, snapToGrid, snapPoint, lerpSnap, rectsIntersect, getCardsInFrame, hitTestAnchors, hitTestConnections, bestAnchorForPoint, hitTestConnectionLabel } from "../lib/geometry";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
   FRAME_MIN_WIDTH, FRAME_MIN_HEIGHT, FRAME_MAX_WIDTH, FRAME_MAX_HEIGHT,
+  ANCHOR_DOT_HIT_RADIUS, CONNECTION_HIT_TOLERANCE,
 } from "../constants";
 
 const RESIZE_DIR: Record<HandleCorner, { wSign: number; hSign: number; movesX: boolean; movesY: boolean }> = {
@@ -63,6 +64,12 @@ export interface InteractionDeps {
   frames: React.RefObject<Frame[]>;
   selectedFrameIds: React.RefObject<Set<string>>;
   presentingRef: React.RefObject<PresentationState | null>;
+  connections: React.RefObject<Connection[]>;
+  selectedConnectionIds: React.RefObject<Set<string>>;
+  activeToolRef: React.RefObject<ActiveTool>;
+  connectionDrag: React.RefObject<ConnectionDragState | null>;
+  editingConnectionLabelRef: React.RefObject<string | null>;
+  setActiveTool: (tool: ActiveTool) => void;
   draw: () => void;
   scheduleRedraw: () => void;
   saveSnapshot: () => void;
@@ -74,6 +81,10 @@ export interface InteractionDeps {
   syncEditorPosition: () => void;
   getCardMaxScroll: (cardId: string) => number;
   startEditingFrameLabel: (frame: Frame) => void;
+  createConnection: (fromCardId: string, toCardId: string, fromAnchor: Connection["fromAnchor"], toAnchor: Connection["toAnchor"], color?: string) => Connection;
+  insertConnection: (conn: Connection) => void;
+  connectionExists: (fromCardId: string, toCardId: string) => boolean;
+  startEditingConnectionLabel: (conn: Connection) => void;
 }
 
 export function useCanvasInteractions(deps: InteractionDeps): void {
@@ -106,6 +117,11 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
     const framesRef = depsRef.current.frames;
     const selectedFrameIdsRef = depsRef.current.selectedFrameIds;
     const presentingRef = depsRef.current.presentingRef;
+    const connectionsRef = depsRef.current.connections;
+    const selectedConnectionIdsRef = depsRef.current.selectedConnectionIds;
+    const activeToolRef = depsRef.current.activeToolRef;
+    const connectionDragRef = depsRef.current.connectionDrag;
+    const editingConnectionLabelRef = depsRef.current.editingConnectionLabelRef;
 
     // Frame interaction state
     const frameDragState = { current: null as FrameDragState | null };
@@ -179,12 +195,20 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
         canvas.style.cursor = handleCursor(resizeStateRef.current.handle);
         return;
       }
+      if (connectionDragRef.current) {
+        canvas.style.cursor = "crosshair";
+        return;
+      }
       if (dragStateRef.current || frameDragState.current || isPanningRef.current) {
         canvas.style.cursor = "grabbing";
         return;
       }
       if (spaceHeldRef.current) {
         canvas.style.cursor = "grab";
+        return;
+      }
+      if (activeToolRef.current === "connection") {
+        canvas.style.cursor = "crosshair";
         return;
       }
       const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
@@ -213,7 +237,23 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
         depsRef.current.setContextMenu({
           screenX: e.clientX, screenY: e.clientY,
           worldX: world.x, worldY: world.y,
-          cardId: hit.id, frameId: null,
+          cardId: hit.id, frameId: null, connectionId: null,
+        });
+        return;
+      }
+
+      // Connection hit-test (before frames, since connections are visually more prominent)
+      const connHit = hitTestConnections(world.x, world.y, connectionsRef.current, cardsRef.current, CONNECTION_HIT_TOLERANCE / cameraRef.current.zoom);
+      if (connHit) {
+        selectedConnectionIdsRef.current.clear();
+        selectedConnectionIdsRef.current.add(connHit.id);
+        selectedCardIdsRef.current.clear();
+        selectedFrameIdsRef.current.clear();
+        depsRef.current.scheduleRedraw();
+        depsRef.current.setContextMenu({
+          screenX: e.clientX, screenY: e.clientY,
+          worldX: world.x, worldY: world.y,
+          cardId: null, frameId: null, connectionId: connHit.id,
         });
         return;
       }
@@ -229,7 +269,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
         depsRef.current.setContextMenu({
           screenX: e.clientX, screenY: e.clientY,
           worldX: world.x, worldY: world.y,
-          cardId: null, frameId: frameHit.id,
+          cardId: null, frameId: frameHit.id, connectionId: null,
         });
         return;
       }
@@ -237,7 +277,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
       depsRef.current.setContextMenu({
         screenX: e.clientX, screenY: e.clientY,
         worldX: world.x, worldY: world.y,
-        cardId: null, frameId: null,
+        cardId: null, frameId: null, connectionId: null,
       });
     }
 
@@ -259,6 +299,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
       }
 
       if (editingRef.current) return;
+      if (editingConnectionLabelRef.current) return;
 
       if (contextMenuRef.current) {
         depsRef.current.setContextMenu(null);
@@ -318,6 +359,27 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
 
       const world = mouseToWorld(e, canvasRect, cameraRef.current);
 
+      // Connection tool mode: click card → start connection drag
+      if (activeToolRef.current === "connection") {
+        const hit = hitTestCards(world.x, world.y, cardsRef.current);
+        if (hit) {
+          const anchor = bestAnchorForPoint(hit, world);
+          connectionDragRef.current = {
+            fromCardId: hit.id,
+            fromAnchor: anchor,
+            currentWorld: world,
+            snapTarget: null,
+          };
+          canvas.style.cursor = "crosshair";
+          depsRef.current.scheduleRedraw();
+          return;
+        }
+        // Click empty space → cancel tool
+        depsRef.current.setActiveTool("pointer");
+        canvas.style.cursor = "default";
+        return;
+      }
+
       // Cards
       const hit = hitTestCards(world.x, world.y, cardsRef.current);
       if (hit) {
@@ -333,6 +395,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
           depsRef.current.selectCard(hit.id);
           selectedFrameIdsRef.current.clear();
         }
+        selectedConnectionIdsRef.current.clear();
         depsRef.current.saveSnapshot();
         const offsets: DragState["offsets"] = [];
         const rest: Card[] = [];
@@ -353,6 +416,23 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
         return;
       }
 
+      // Connections — click to select
+      const connHit = hitTestConnections(world.x, world.y, connectionsRef.current, cardsRef.current, CONNECTION_HIT_TOLERANCE / cameraRef.current.zoom);
+      if (connHit) {
+        if (e.shiftKey) {
+          const sel = selectedConnectionIdsRef.current;
+          if (sel.has(connHit.id)) sel.delete(connHit.id);
+          else sel.add(connHit.id);
+        } else {
+          selectedConnectionIdsRef.current.clear();
+          selectedConnectionIdsRef.current.add(connHit.id);
+          selectedCardIdsRef.current.clear();
+          selectedFrameIdsRef.current.clear();
+        }
+        depsRef.current.scheduleRedraw();
+        return;
+      }
+
       // Frame border/label
       const frameHit = hitTestFrames(world.x, world.y, framesRef.current, FRAME_BORDER_HIT_THICKNESS / cameraRef.current.zoom);
       if (frameHit) {
@@ -369,6 +449,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
           selectedFrameIdsRef.current.add(frameHit.id);
           selectedCardIdsRef.current.clear();
         }
+        selectedConnectionIdsRef.current.clear();
         depsRef.current.saveSnapshot();
         const offsets: FrameDragState["offsets"] = [];
         for (const f of framesRef.current) {
@@ -398,12 +479,38 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
       if (!e.shiftKey) {
         selectedCardIdsRef.current.clear();
         selectedFrameIdsRef.current.clear();
+        selectedConnectionIdsRef.current.clear();
       }
       boxSelectRef.current = { start: world, current: world };
       depsRef.current.scheduleRedraw();
     }
 
     function onMouseMove(e: MouseEvent): void {
+      // Connection drag
+      if (connectionDragRef.current) {
+        const world = mouseToWorld(e, canvasRect, cameraRef.current);
+        connectionDragRef.current.currentWorld = world;
+        // Check snap to target card anchor
+        let snap: ConnectionDragState["snapTarget"] = null;
+        for (const card of cardsRef.current) {
+          if (card.id === connectionDragRef.current.fromCardId) continue;
+          const anchor = hitTestAnchors(world.x, world.y, card, ANCHOR_DOT_HIT_RADIUS / cameraRef.current.zoom);
+          if (anchor) {
+            snap = { cardId: card.id, anchor };
+            break;
+          }
+          // Also check if hovering inside the card — snap to best anchor
+          if (world.x >= card.x && world.x <= card.x + card.width &&
+              world.y >= card.y && world.y <= card.y + card.height) {
+            snap = { cardId: card.id, anchor: bestAnchorForPoint(card, world) };
+            break;
+          }
+        }
+        connectionDragRef.current.snapTarget = snap;
+        depsRef.current.scheduleRedraw();
+        return;
+      }
+
       if (resizeStateRef.current) {
         const { x: sx, y: sy } = mouseToScreen(e, canvasRect);
         resizeTargetRef.current = computeResizeTarget(resizeStateRef.current, sx, sy, cameraRef.current.zoom);
@@ -452,6 +559,27 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
 
     function onMouseUp(e: MouseEvent): void {
       if (e.button !== 0 && e.button !== 1) return;
+
+      // Complete connection drag
+      if (connectionDragRef.current) {
+        const drag = connectionDragRef.current;
+        if (drag.snapTarget && drag.snapTarget.cardId !== drag.fromCardId &&
+            !depsRef.current.connectionExists(drag.fromCardId, drag.snapTarget.cardId)) {
+          depsRef.current.saveSnapshot();
+          const conn = depsRef.current.createConnection(
+            drag.fromCardId, drag.snapTarget.cardId,
+            drag.fromAnchor, drag.snapTarget.anchor,
+          );
+          depsRef.current.insertConnection(conn);
+          depsRef.current.markDirty();
+        }
+        connectionDragRef.current = null;
+        depsRef.current.setActiveTool("pointer");
+        depsRef.current.scheduleRedraw();
+        updateCursor(e);
+        return;
+      }
+
       if (boxSelectRef.current) {
         const { start, current } = boxSelectRef.current;
         const bx = Math.min(start.x, current.x);
@@ -531,6 +659,21 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
 
       if (hit) {
         depsRef.current.openEditor(hit);
+        return;
+      }
+
+      // Double-click on connection label → edit label
+      for (const conn of connectionsRef.current) {
+        if (hitTestConnectionLabel(world.x, world.y, conn, cardsRef.current)) {
+          depsRef.current.startEditingConnectionLabel(conn);
+          return;
+        }
+      }
+
+      // Double-click on connection → start editing label (even if no label yet)
+      const connHit = hitTestConnections(world.x, world.y, connectionsRef.current, cardsRef.current, CONNECTION_HIT_TOLERANCE / cameraRef.current.zoom);
+      if (connHit) {
+        depsRef.current.startEditingConnectionLabel(connHit);
         return;
       }
 

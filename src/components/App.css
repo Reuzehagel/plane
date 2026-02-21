@@ -545,6 +545,20 @@ canvas {
   font-size: 13px;
 }
 
+/* ── Connection Label Editor ────────────────────────── */
+
+.connection-label-editor {
+  position: absolute;
+  z-index: 10;
+  background: #1a1a1a;
+  color: #d0d0d0;
+  border: 1px solid var(--accent-color);
+  border-radius: 3px;
+  outline: none;
+  font-family: var(--card-font);
+  text-align: center;
+}
+
 /* ── Frame Label Editor ─────────────────────────────── */
 
 .frame-label-editor {
@@ -667,6 +681,70 @@ canvas {
 .sidebar-present-btn:hover {
   border-color: var(--accent-color);
   color: var(--accent-color);
+}
+
+/* ── Toolbar ────────────────────────────────────────── */
+
+.toolbar {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(10, 10, 10, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.toolbar-indicator {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--accent-color);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.toolbar-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: #666;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.toolbar-btn:hover:not(.active) {
+  color: #d0d0d0;
+}
+
+.toolbar-btn.active {
+  color: #fff;
+}
+
+.toolbar-shortcut {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  font-family: var(--card-font);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 /* ── Presentation Overlay ───────────────────────────── */
