@@ -1,6 +1,6 @@
 import { readTextFile, writeTextFile, mkdir, exists, BaseDirectory } from "@tauri-apps/plugin-fs";
-import type { Card, Grid } from "./types";
-import { DEFAULT_CARD_COLOR } from "./constants";
+import type { Card, Grid } from "../types";
+import { DEFAULT_CARD_COLOR } from "../constants";
 
 export interface WorkspaceData {
   grids: Grid[];

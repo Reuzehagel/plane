@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, Point, ResizeState, ResizeTarget } from "./types";
-import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, snapToGrid, snapPoint, lerpSnap, rectsIntersect } from "./geometry";
+import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, HandleCorner, Point, ResizeState, ResizeTarget } from "../types";
+import { mouseToScreen, mouseToWorld, hitTestCards, hitTestHandles, snapToGrid, snapPoint, lerpSnap, rectsIntersect } from "../lib/geometry";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_MIN_WIDTH, CARD_MIN_HEIGHT, CARD_MAX_WIDTH, CARD_MAX_HEIGHT,
-} from "./constants";
+} from "../constants";
 
 const RESIZE_DIR: Record<HandleCorner, { wSign: number; hSign: number; movesX: boolean; movesY: boolean }> = {
   se: { wSign:  1, hSign:  1, movesX: false, movesY: false },

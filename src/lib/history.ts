@@ -1,5 +1,5 @@
-import { MAX_UNDO } from "./constants";
-import type { Card, History, Snapshot } from "./types";
+import { MAX_UNDO } from "../constants";
+import type { Card, History, Snapshot } from "../types";
 
 function cloneSnapshot(cards: Card[], selectedCardIds: Set<string>): Snapshot {
   return {

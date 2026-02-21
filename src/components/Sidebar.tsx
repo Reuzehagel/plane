@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Plus, X } from "lucide-react";
-import type { GridSummary } from "./types";
+import type { GridSummary } from "../types";
 
 export interface SidebarProps {
   grids: GridSummary[];

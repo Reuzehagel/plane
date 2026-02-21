@@ -1,20 +1,20 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import "./App.css";
-import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, History, Point, ResizeState, ResizeTarget, Snapshot } from "./types";
-import { screenToWorld, worldToScreen, snapPoint, getContentBounds, getBoundsCenter, isContentVisible } from "./geometry";
-import { drawScene } from "./rendering";
-import { pushSnapshot } from "./history";
+import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, History, Point, ResizeState, ResizeTarget, Snapshot } from "../types";
+import { screenToWorld, worldToScreen, snapPoint, getContentBounds, getBoundsCenter, isContentVisible } from "../lib/geometry";
+import { drawScene } from "../lib/rendering";
+import { pushSnapshot } from "../lib/history";
 import {
   MIN_ZOOM, MAX_ZOOM,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
   CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS, DUPLICATE_OFFSET,
   CAMERA_LERP, CAMERA_FOCAL_EPSILON, CAMERA_ZOOM_EPSILON, FIT_PADDING,
-} from "./constants";
-import { useKeyboard } from "./useKeyboard";
-import { useCanvasInteractions } from "./useCanvasInteractions";
-import { createMenuHandlers } from "./menuHandlers";
-import { runMutation } from "./mutation";
-import { loadWorkspace, saveWorkspace } from "./persistence";
+} from "../constants";
+import { useKeyboard } from "../hooks/useKeyboard";
+import { useCanvasInteractions } from "../hooks/useCanvasInteractions";
+import { createMenuHandlers } from "../lib/menuHandlers";
+import { runMutation } from "../lib/mutation";
+import { loadWorkspace, saveWorkspace } from "../lib/persistence";
 import { Sidebar } from "./Sidebar";
 import { LocateFixed } from "lucide-react";
 

@@ -1,5 +1,5 @@
-import type { Camera, Card, HandleCorner, Point } from "./types";
-import { DOT_SPACING, HANDLE_HIT_SIZE, SNAP_LERP, SNAP_EPSILON } from "./constants";
+import type { Camera, Card, HandleCorner, Point } from "../types";
+import { DOT_SPACING, HANDLE_HIT_SIZE, SNAP_LERP, SNAP_EPSILON } from "../constants";
 
 function pointInRect(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
   return px >= x && px <= x + w && py >= y && py <= y + h;

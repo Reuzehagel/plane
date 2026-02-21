@@ -1,6 +1,6 @@
 import type React from "react";
-import type { Card, ContextMenuState } from "./types";
-import { CARD_WIDTH, CARD_HEIGHT, DUPLICATE_OFFSET } from "./constants";
+import type { Card, ContextMenuState } from "../types";
+import { CARD_WIDTH, CARD_HEIGHT, DUPLICATE_OFFSET } from "../constants";
 import { snapPoint } from "./geometry";
 import { runMutation } from "./mutation";
 

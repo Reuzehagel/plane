@@ -25,30 +25,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `function` declarations over arrow functions
 - Explicit return types on all functions
 - Shared types in `src/types.ts`
-- Constants in `src/constants.ts`; pure logic modules (e.g. `src/history.ts`, `src/geometry.ts`) have no React dependencies
+- Constants in `src/constants.ts`; pure logic modules (e.g. `src/lib/history.ts`, `src/lib/geometry.ts`) have no React dependencies
 - Use refs (not state) for high-frequency data (camera, cards, drag state)
 - Only use React state when a re-render is needed (e.g. editing overlay)
 - Keep comments to "why", not "what"
 
 ## Architecture
 
-The app is a single `App` component (`src/App.tsx`) that owns a full-window `<canvas>`, with interaction logic extracted into hooks.
+The app is a single `App` component (`src/components/App.tsx`) that owns a full-window `<canvas>`, with interaction logic extracted into hooks.
 
 ### Modules
 
 - `src/main.tsx` — React entry point
-- `src/App.tsx` — Canvas app: state declarations, card CRUD, editor, history/persistence, grid management, rendering
 - `src/types.ts` — All shared interfaces and type aliases
 - `src/constants.ts` — Visual and behavior constants
-- `src/geometry.ts` — Coordinate conversion, hit testing, snap/lerp utilities, viewport helpers, and `rectsIntersect`
-- `src/rendering.ts` — Canvas 2D draw functions (drawScene)
-- `src/history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
-- `src/mutation.ts` — `runMutation(deps, action)` helper: saveSnapshot → action → scheduleRedraw → markDirty
-- `src/menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
-- `src/useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all, fit-to-content)
-- `src/useCanvasInteractions.ts` — Mouse/wheel/space-key event handling hook (drag, resize, box-select, pan, zoom)
-- `src/persistence.ts` — Workspace save/load via localStorage
-- `src/Sidebar.tsx` — Grid list sidebar component
+- **`src/components/`** — React components
+  - `App.tsx` — Canvas app: state declarations, card CRUD, editor, history/persistence, grid management, rendering
+  - `Sidebar.tsx` — Grid list sidebar component
+- **`src/hooks/`** — React hooks
+  - `useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all, fit-to-content, copy/paste)
+  - `useCanvasInteractions.ts` — Mouse/wheel/space-key event handling hook (drag, resize, box-select, pan, zoom)
+- **`src/lib/`** — Pure logic modules (no React dependencies)
+  - `geometry.ts` — Coordinate conversion, hit testing, snap/lerp utilities, viewport helpers, and `rectsIntersect`
+  - `rendering.ts` — Canvas 2D draw functions (drawScene)
+  - `history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
+  - `mutation.ts` — `runMutation(deps, action)` helper: saveSnapshot → action → scheduleRedraw → markDirty
+  - `menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
+  - `persistence.ts` — Workspace save/load via Tauri AppData
 
 ### Rendering Pipeline
 
@@ -59,7 +62,7 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 
 ### State
 
-- Workspace (grids, cards, cameras) persists to Tauri AppData via `src/persistence.ts` with 2s debounced save and v1→v2 migration
+- Workspace (grids, cards, cameras) persists to Tauri AppData via `src/lib/persistence.ts` with 2s debounced save and v1→v2 migration
 - Card editor is a single-line `<input>`, not multi-line
 
 ### Coordinate System
@@ -72,8 +75,8 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 ### Event Handling
 
 - `useRefState<T>()` helper in App.tsx pairs `useState` with a ref — returns `[state, ref, setState]`
-- Mouse/wheel interaction is handled via native event listeners in `useCanvasInteractions.ts`, not React event props
-- Keyboard shortcuts are extracted to `useKeyboard.ts` hook
+- Mouse/wheel interaction is handled via native event listeners in `src/hooks/useCanvasInteractions.ts`, not React event props
+- Keyboard shortcuts are extracted to `src/hooks/useKeyboard.ts` hook
 - Extracted hooks/modules (`useCanvasInteractions.ts`, `useKeyboard.ts`, `menuHandlers.ts`) receive a `*Deps` interface — keeps them decoupled from App internals
 - Hooks using `*Deps` follow the `depsRef` pattern: capture deps in a ref, alias stable refs at effect setup, read function deps from `depsRef.current` at call time
 - For each React state that imperative event handlers need, a parallel ref mirrors it (e.g. `editingRef` ↔ `editing`, `contextMenuRef` ↔ `contextMenu`)
@@ -91,16 +94,18 @@ The app is a single `App` component (`src/App.tsx`) that owns a full-window `<ca
 
 ### Undo/Redo
 
-- Snapshot-based: deep clones of `cards` + `selectedCardIds` before each user action (`src/history.ts`)
+- Snapshot-based: deep clones of `cards` + `selectedCardIds` before each user action (`src/lib/history.ts`)
 - Use `runMutation(deps, action)` for the standard snapshot→mutate→redraw→dirty workflow; drag/resize capture snapshot at mousedown, not per frame
 - `removeCard()` is a low-level helper — callers push snapshots, not `removeCard` itself
-- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; Delete/Backspace deletes selected; Ctrl+A selects all; arrow keys nudge by `NUDGE_AMOUNT` px
+- Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; Delete/Backspace deletes selected; Ctrl+A selects all; Ctrl+C/V copy/paste; arrow keys nudge by `NUDGE_AMOUNT` px
 
 ### Context Menu
 
 - Right-click opens a context menu (DOM overlay, same pattern as card editor)
 - Card menu: Edit, Duplicate, Copy, Reset Size, Delete; empty-space menu: Paste, New Card
-- Internal clipboard ref (`Card | null`) — not system clipboard
+- Internal clipboard ref (`Card[]`) supports multi-card copy; Ctrl+C/V work alongside context menu Copy/Paste
+- Ctrl+V prefers internal clipboard; falls back to system clipboard text → new card
+- Pasted cards are offset by `DUPLICATE_OFFSET` to avoid overlapping originals
 - Menu closes on: left-click, Escape, scroll/zoom
 
 ### Snap-to-Grid

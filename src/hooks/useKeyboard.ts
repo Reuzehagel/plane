@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { Card, ContextMenuState, EditingState, History, Point, Snapshot } from "./types";
-import { undo, redo } from "./history";
-import { NUDGE_AMOUNT } from "./constants";
-import { snapToGrid } from "./geometry";
-import { runMutation } from "./mutation";
+import type { Card, ContextMenuState, EditingState, History, Point, Snapshot } from "../types";
+import { undo, redo } from "../lib/history";
+import { NUDGE_AMOUNT } from "../constants";
+import { snapToGrid } from "../lib/geometry";
+import { runMutation } from "../lib/mutation";
 
 const NUDGE_DIR: Record<string, Point> = {
   ArrowLeft:  { x: -NUDGE_AMOUNT, y: 0 },

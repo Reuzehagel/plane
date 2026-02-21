@@ -1,4 +1,4 @@
-import type { BoxSelectState, Camera, Card } from "./types";
+import type { BoxSelectState, Camera, Card } from "../types";
 import { worldToScreen, getCardCorners } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
@@ -7,7 +7,7 @@ import {
   CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
   CARD_ACCENT_HEIGHT,
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
-} from "./constants";
+} from "../constants";
 
 const TWO_PI = Math.PI * 2;
 const HALF_HANDLE = HANDLE_SIZE / 2;
