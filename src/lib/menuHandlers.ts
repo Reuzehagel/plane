@@ -1,6 +1,6 @@
 import type React from "react";
 import type { Card, ContextMenuState } from "../types";
-import { CARD_WIDTH, CARD_HEIGHT, DUPLICATE_OFFSET } from "../constants";
+import { CARD_WIDTH, DUPLICATE_OFFSET } from "../constants";
 import { snapPoint } from "./geometry";
 import { runMutation } from "./mutation";
 
@@ -11,7 +11,8 @@ export interface MenuHandlerDeps {
   findCard: (id: string) => Card | undefined;
   removeCard: (id: string) => void;
   deleteSelectedCards: () => void;
-  createCard: (x: number, y: number, w: number, h: number, title: string, color?: string) => Card;
+  createCard: (x: number, y: number, w: number, h: number, text: string, color?: string) => Card;
+  recalculateCardHeight: (card: Card) => void;
   insertCard: (card: Card) => void;
   openEditor: (card: Card) => void;
   createAndStartEditingCardAt: (worldX: number, worldY: number) => void;
@@ -61,7 +62,7 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     if (!card) return;
     runMenuAction(deps, () => {
       const pos = snapPoint(card.x + DUPLICATE_OFFSET, card.y + DUPLICATE_OFFSET);
-      const clone = deps.createCard(pos.x, pos.y, card.width, card.height, card.title, card.color);
+      const clone = deps.createCard(pos.x, pos.y, card.width, card.height, card.text, card.color);
       deps.insertCard(clone);
     });
   }
@@ -83,7 +84,7 @@ export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {
     if (!card) return;
     runMenuAction(deps, () => {
       card.width = CARD_WIDTH;
-      card.height = CARD_HEIGHT;
+      deps.recalculateCardHeight(card);
     });
   }
 

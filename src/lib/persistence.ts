@@ -18,13 +18,24 @@ interface WorkspaceFileV2 {
   grids: Array<{
     id: string;
     name: string;
+    cards: Array<Card & { color?: string; title?: string }>;
+    camera: { x: number; y: number; zoom: number };
+  }>;
+  activeGridId: string;
+}
+
+interface WorkspaceFileV3 {
+  version: 3;
+  grids: Array<{
+    id: string;
+    name: string;
     cards: Array<Card & { color?: string }>;
     camera: { x: number; y: number; zoom: number };
   }>;
   activeGridId: string;
 }
 
-type WorkspaceFile = WorkspaceFileV1 | WorkspaceFileV2;
+type WorkspaceFile = WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3;
 
 const DIR = "com.nick.plane";
 const FILE = `${DIR}/workspace.json`;
@@ -58,7 +69,20 @@ function migrateV1(data: WorkspaceFileV1): WorkspaceData {
   };
 }
 
-function parseV2(data: WorkspaceFileV2): WorkspaceData {
+function migrateV2(data: WorkspaceFileV2): WorkspaceData {
+  return {
+    grids: data.grids.map((g) => ({
+      ...g,
+      cards: backfillCardColors(g.cards.map((c) => ({
+        ...c,
+        text: (c as Card & { title?: string }).title ?? c.text ?? "",
+      }))),
+    })),
+    activeGridId: data.activeGridId,
+  };
+}
+
+function parseV3(data: WorkspaceFileV3): WorkspaceData {
   return {
     grids: data.grids.map((g) => ({
       ...g,
@@ -77,7 +101,8 @@ export async function loadWorkspace(): Promise<WorkspaceData> {
     const data: WorkspaceFile = JSON.parse(raw);
 
     switch (data.version) {
-      case 2: return parseV2(data);
+      case 3: return parseV3(data);
+      case 2: return migrateV2(data);
       case 1: return migrateV1(data);
       default: return defaultWorkspace();
     }
@@ -90,8 +115,8 @@ export async function loadWorkspace(): Promise<WorkspaceData> {
 export async function saveWorkspace(grids: Grid[], activeGridId: string): Promise<void> {
   try {
     await mkdir(DIR, { baseDir: BASE, recursive: true });
-    const data: WorkspaceFileV2 = {
-      version: 2,
+    const data: WorkspaceFileV3 = {
+      version: 3,
       grids: grids.map(({ id, name, cards, camera }) => ({
         id,
         name,

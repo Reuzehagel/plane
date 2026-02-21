@@ -5,9 +5,10 @@ import {
   CARD_RADIUS, CARD_BG, CARD_BORDER,
   CARD_SHADOW, CARD_SELECTED_BORDER, HANDLE_SIZE,
   CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
-  CARD_ACCENT_HEIGHT,
+  CARD_ACCENT_HEIGHT, LINE_HEIGHT, CARD_BODY_COLOR,
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
 } from "../constants";
+import { wrapText } from "./textLayout";
 
 const TWO_PI = Math.PI * 2;
 const HALF_HANDLE = HANDLE_SIZE / 2;
@@ -49,6 +50,7 @@ export function drawScene(
   cards: Card[],
   selectedCardIds: Set<string>,
   boxSelect: BoxSelectState | null,
+  editingCardId: string | null = null,
 ): void {
   const { x: camX, y: camY, zoom } = camera;
 
@@ -87,13 +89,8 @@ export function drawScene(
     const sw = card.width * zoom;
     const sh = card.height * zoom;
     const path = roundRectPath(sx, sy, sw, sh, sr);
-    const selected = selectedCardIds.has(card.id);
 
-    if (selected) {
-      selectedRects.push({ sx, sy, sw, sh });
-    }
-
-    // Fill with shadow
+    // Shadow + fill (drawn even for the editing card so it remains visible behind the editor overlay)
     ctx.save();
     ctx.shadowColor = CARD_SHADOW;
     ctx.shadowBlur = 8 * zoom;
@@ -101,6 +98,14 @@ export function drawScene(
     ctx.fillStyle = CARD_BG;
     ctx.fill(path);
     ctx.restore();
+
+    // The editing card's visuals (accent, border, text) are hidden behind the DOM editor overlay
+    if (card.id === editingCardId) continue;
+
+    const selected = selectedCardIds.has(card.id);
+    if (selected) {
+      selectedRects.push({ sx, sy, sw, sh });
+    }
 
     // Accent bar at top (clipped to card shape)
     ctx.save();
@@ -120,14 +125,35 @@ export function drawScene(
       ctx.stroke(path);
     }
 
-    if (card.title) {
+    if (card.text) {
       ctx.save();
       const clipPath = roundRectPath(sx + CARD_TEXT_CLIP_PAD * zoom, sy, sw - CARD_TEXT_CLIP_PAD * 2 * zoom, sh, sr);
       ctx.clip(clipPath);
-      ctx.fillStyle = card.color;
       ctx.font = `${CARD_FONT_SIZE * zoom}px ${CARD_TITLE_FONT}`;
-      ctx.textBaseline = "middle";
-      ctx.fillText(card.title.toUpperCase(), sx + CARD_TEXT_PAD * zoom, sy + sh / 2);
+      ctx.textBaseline = "top";
+
+      const textMaxWidth = (card.width - CARD_TEXT_PAD * 2) * zoom;
+      const lines = wrapText(ctx, card.text, textMaxWidth);
+      const textPad = CARD_TEXT_PAD * zoom;
+      const lineH = LINE_HEIGHT * zoom;
+      const textX = sx + textPad;
+
+      if (lines.length === 1) {
+        // Single line: vertically centered, uppercase, accent color
+        ctx.fillStyle = card.color;
+        ctx.textBaseline = "middle";
+        ctx.fillText(lines[0].text.toUpperCase(), textX, sy + sh / 2);
+      } else {
+        const startY = sy + accentH + textPad;
+        const bottomLimit = sy + sh - textPad;
+        for (let i = 0; i < lines.length; i++) {
+          const lineY = startY + i * lineH;
+          if (lineY + lineH > bottomLimit + lineH * 0.5) break;
+          const line = lines[i];
+          ctx.fillStyle = line.isHeader ? card.color : CARD_BODY_COLOR;
+          ctx.fillText(line.isHeader ? line.text.toUpperCase() : line.text, textX, lineY);
+        }
+      }
       ctx.restore();
     }
   }

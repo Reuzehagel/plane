@@ -30,6 +30,8 @@ export const CARD_TEXT_PAD = 10;
 export const CARD_TEXT_CLIP_PAD = 4;
 
 export const CARD_ACCENT_HEIGHT = 3;
+export const LINE_HEIGHT = 20;
+export const CARD_BODY_COLOR = "#999999";
 
 export const CARD_COLORS = [
   "#e8915a", // orange

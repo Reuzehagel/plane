@@ -7,7 +7,8 @@ import { pushSnapshot } from "../lib/history";
 import {
   MIN_ZOOM, MAX_ZOOM,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
-  CARD_FONT_SIZE, CARD_TEXT_PAD, CARD_COLORS, DUPLICATE_OFFSET,
+  CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_COLORS, DUPLICATE_OFFSET,
+  CARD_ACCENT_HEIGHT, LINE_HEIGHT, CARD_BODY_COLOR,
   CAMERA_LERP, CAMERA_FOCAL_EPSILON, CAMERA_ZOOM_EPSILON, FIT_PADDING,
 } from "../constants";
 import { useKeyboard } from "../hooks/useKeyboard";
@@ -15,6 +16,7 @@ import { useCanvasInteractions } from "../hooks/useCanvasInteractions";
 import { createMenuHandlers } from "../lib/menuHandlers";
 import { runMutation } from "../lib/mutation";
 import { loadWorkspace, saveWorkspace } from "../lib/persistence";
+import { computeCardHeight } from "../lib/textLayout";
 import { Sidebar } from "./Sidebar";
 import { LocateFixed } from "lucide-react";
 
@@ -51,6 +53,9 @@ function App(): React.JSX.Element {
   const [contextMenu, contextMenuRef, setContextMenu] = useRefState<ContextMenuState | null>(null);
   const clipboard = useRef<Card[]>([]);
 
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const headerInputRef = useRef<HTMLInputElement>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isLoaded = useRef(false);
   const saveTimerId = useRef<number>(0);
@@ -87,7 +92,7 @@ function App(): React.JSX.Element {
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
-    drawScene(ctxRef.current, dpr, w, h, camera.current, cards.current, selectedCardIds.current, boxSelect.current);
+    drawScene(ctxRef.current, dpr, w, h, camera.current, cards.current, selectedCardIds.current, boxSelect.current, editingRef.current?.cardId ?? null);
     setContentOffscreen(!isContentVisible(cards.current, camera.current, w, h));
   }, []);
 
@@ -152,10 +157,10 @@ function App(): React.JSX.Element {
     selectedCardIds.current.delete(cardId);
   }
 
-  function createCard(x: number, y: number, width: number, height: number, title: string, color?: string): Card {
+  function createCard(x: number, y: number, width: number, height: number, text: string, color?: string): Card {
     const c = color ?? CARD_COLORS[colorIndex.current % CARD_COLORS.length];
     if (!color) colorIndex.current++;
-    return { id: crypto.randomUUID(), x, y, width, height, title, color: c };
+    return { id: crypto.randomUUID(), x, y, width, height, text, color: c };
   }
 
   function insertCard(card: Card): void {
@@ -184,13 +189,16 @@ function App(): React.JSX.Element {
   function openEditor(card: Card): void {
     const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
     const zoom = camera.current.zoom;
-    setEditing({
+    const state: EditingState = {
       cardId: card.id,
       screenX: sx,
       screenY: sy,
       screenWidth: card.width * zoom,
       screenHeight: card.height * zoom,
-    });
+    };
+    editingRef.current = state;
+    setEditing(state);
+    scheduleRedraw();
   }
 
   function createAndStartEditingCardAt(worldX: number, worldY: number): void {
@@ -217,7 +225,7 @@ function App(): React.JSX.Element {
       selectedCardIds.current.clear();
       for (const s of sources) {
         const pos = snapPoint(s.x + dx, s.y + dy);
-        const newCard = createCard(pos.x, pos.y, s.width, s.height, s.title, s.color);
+        const newCard = createCard(pos.x, pos.y, s.width, s.height, s.text, s.color);
         cards.current.push(newCard);
         selectedCardIds.current.add(newCard.id);
       }
@@ -239,6 +247,7 @@ function App(): React.JSX.Element {
         const center = viewportCenter();
         const snap = snapPoint(center.x - CARD_WIDTH / 2, center.y - CARD_HEIGHT / 2);
         const newCard = createCard(snap.x, snap.y, CARD_WIDTH, CARD_HEIGHT, trimmed);
+        recalculateCardHeight(newCard);
         runMutation({ saveSnapshot, scheduleRedraw, markDirty }, () => insertCard(newCard));
       });
     }
@@ -365,16 +374,28 @@ function App(): React.JSX.Element {
     };
   }, []);
 
-  function commitEdit(value: string): void {
+  function recalculateCardHeight(card: Card): void {
+    const ctx = ctxRef.current;
+    if (ctx) {
+      ctx.font = `${CARD_FONT_SIZE}px ${CARD_TITLE_FONT}`;
+      card.height = computeCardHeight(ctx, card.text, card.width);
+    }
+  }
+
+  function commitEdit(): void {
     if (!editing) return;
+    const header = headerInputRef.current?.value ?? "";
+    const body = bodyTextareaRef.current?.value ?? "";
+    const value = body ? header + "\n" + body : header;
     const card = findCard(editing.cardId);
     if (card) {
-      if (value.trim() === "" && card.title === "") {
+      if (value.trim() === "" && card.text === "") {
         saveSnapshot();
         removeCard(editing.cardId);
       } else {
-        if (card.title !== value) saveSnapshot();
-        card.title = value;
+        if (card.text !== value) saveSnapshot();
+        card.text = value;
+        recalculateCardHeight(card);
       }
     }
     setEditing(null);
@@ -385,7 +406,7 @@ function App(): React.JSX.Element {
   function cancelEdit(): void {
     if (!editing) return;
     const card = findCard(editing.cardId);
-    if (card && card.title === "") {
+    if (card && card.text === "") {
       saveSnapshot();
       removeCard(editing.cardId);
       scheduleRedraw();
@@ -408,7 +429,7 @@ function App(): React.JSX.Element {
     contextMenu, selectedCardIds, clipboard,
     findCard, removeCard, deleteSelectedCards, createCard, insertCard, openEditor,
     createAndStartEditingCardAt, copySelectedCards, pasteCardsAtPoint,
-    saveSnapshot, setContextMenu, scheduleRedraw, markDirty,
+    recalculateCardHeight, saveSnapshot, setContextMenu, scheduleRedraw, markDirty,
   });
 
   const editingCard = editing ? findCard(editing.cardId) : null;
@@ -431,31 +452,107 @@ function App(): React.JSX.Element {
         <LocateFixed size={16} strokeWidth={1.8} />
       </button>
       <canvas ref={canvasRef} />
-      {editing && (
-        <input
-          className="card-editor"
-          style={{
-            left: editing.screenX,
-            top: editing.screenY,
-            width: editing.screenWidth,
-            height: editing.screenHeight,
-            fontSize: CARD_FONT_SIZE * camera.current.zoom,
-            borderRadius: CARD_RADIUS * camera.current.zoom,
-            padding: `0 ${CARD_TEXT_PAD * camera.current.zoom}px`,
-            color: editingCard?.color,
-          }}
-          autoFocus
-          defaultValue={findCard(editing.cardId)?.title ?? ""}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              commitEdit(e.currentTarget.value);
-            } else if (e.key === "Escape") {
-              cancelEdit();
-            }
-          }}
-          onBlur={(e) => commitEdit(e.currentTarget.value)}
-        />
-      )}
+      {editing && (() => {
+        const zoom = camera.current.zoom;
+        const fullText = findCard(editing.cardId)?.text ?? "";
+        const nlIndex = fullText.indexOf("\n");
+        const headerText = nlIndex === -1 ? fullText : fullText.slice(0, nlIndex);
+        const bodyText = nlIndex === -1 ? "" : fullText.slice(nlIndex + 1);
+        const fontSize = CARD_FONT_SIZE * zoom;
+        const lineH = LINE_HEIGHT * zoom;
+        const pad = CARD_TEXT_PAD * zoom;
+        const accentH = CARD_ACCENT_HEIGHT * zoom;
+
+        function handleEditorBlur(e: React.FocusEvent): void {
+          if (editorContainerRef.current?.contains(e.relatedTarget as Node)) return;
+          commitEdit();
+        }
+
+        function handleEditorKeyDown(e: React.KeyboardEvent): void {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            commitEdit();
+          } else if (e.key === "Escape") {
+            cancelEdit();
+          }
+        }
+
+        function autoSizeBody(): void {
+          const el = bodyTextareaRef.current;
+          if (!el) return;
+          el.style.height = "0";
+          el.style.height = `${el.scrollHeight}px`;
+        }
+
+        function bodyRefCallback(el: HTMLTextAreaElement | null): void {
+          (bodyTextareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+          if (el) {
+            requestAnimationFrame(() => {
+              el.style.height = "0";
+              el.style.height = `${el.scrollHeight}px`;
+            });
+          }
+        }
+
+        return (
+          <div
+            ref={editorContainerRef}
+            className="card-editor"
+            style={{
+              left: editing.screenX,
+              top: editing.screenY,
+              width: editing.screenWidth,
+              minHeight: editing.screenHeight,
+              borderRadius: CARD_RADIUS * zoom,
+            }}
+          >
+            <div className="card-editor-accent" style={{ height: accentH, background: editingCard?.color }} />
+            <input
+              ref={headerInputRef}
+              className="card-editor-header"
+              style={{
+                fontSize,
+                lineHeight: `${lineH}px`,
+                padding: `${pad}px ${pad}px ${pad * 0.5}px`,
+                color: editingCard?.color,
+              }}
+              autoFocus
+              placeholder="Title"
+              defaultValue={headerText}
+              onKeyDown={(e) => {
+                handleEditorKeyDown(e);
+                if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                  e.preventDefault();
+                  bodyTextareaRef.current?.focus();
+                }
+              }}
+              onBlur={handleEditorBlur}
+            />
+            <div className="card-editor-separator" style={{ margin: `0 ${pad}px` }} />
+            <textarea
+              ref={bodyRefCallback}
+              className="card-editor-body"
+              style={{
+                fontSize,
+                lineHeight: `${lineH}px`,
+                padding: `${pad * 0.5}px ${pad}px ${pad}px`,
+                color: CARD_BODY_COLOR,
+              }}
+              placeholder="Notes..."
+              defaultValue={bodyText}
+              onKeyDown={(e) => {
+                handleEditorKeyDown(e);
+                if (e.key === "Backspace" && e.currentTarget.value === "") {
+                  e.preventDefault();
+                  headerInputRef.current?.focus();
+                }
+              }}
+              onInput={autoSizeBody}
+              onFocus={autoSizeBody}
+              onBlur={handleEditorBlur}
+            />
+          </div>
+        );
+      })()}
       {contextMenu && (
         <div
           className="context-menu"

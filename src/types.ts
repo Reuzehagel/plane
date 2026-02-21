@@ -9,7 +9,7 @@ export interface Card {
   y: number;
   width: number;
   height: number;
-  title: string;
+  text: string;
   color: string;
 }
 
