@@ -3,7 +3,7 @@ import "./App.css";
 import type { BoxSelectState, Camera, Card, ContextMenuState, DragState, EditingState, Grid, GridSummary, History, Point, ResizeState, ResizeTarget, Snapshot } from "../types";
 import { screenToWorld, worldToScreen, snapPoint, getContentBounds, getBoundsCenter, isContentVisible } from "../lib/geometry";
 import { drawScene } from "../lib/rendering";
-import { pushSnapshot } from "../lib/history";
+import { pushSnapshot, undo, redo } from "../lib/history";
 import {
   MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
@@ -18,6 +18,7 @@ import { runMutation } from "../lib/mutation";
 import { loadWorkspace, saveWorkspace } from "../lib/persistence";
 import { computeCardHeight, wrapText } from "../lib/textLayout";
 import { Sidebar } from "./Sidebar";
+import { CommandPalette } from "./CommandPalette";
 import { LocateFixed } from "lucide-react";
 
 // Pairs useState with a ref that stays in sync, so imperative event handlers
@@ -67,6 +68,7 @@ function App(): React.JSX.Element {
   const colorIndex = useRef(0);
   const [fontsReady, setFontsReady] = useState(false);
   const [contentOffscreen, setContentOffscreen] = useState(false);
+  const [paletteOpen, paletteOpenRef, setPaletteOpen] = useRefState(false);
   const cameraAnimId = useRef<number>(0);
 
   function refreshGridSummaries(): void {
@@ -330,6 +332,85 @@ function App(): React.JSX.Element {
     cameraAnimId.current = requestAnimationFrame(animate);
   }
 
+  function animateCameraToPoint(targetX: number, targetY: number): void {
+    cancelAnimationFrame(cameraAnimId.current);
+    const viewW = window.innerWidth;
+    const viewH = window.innerHeight;
+    const cam = camera.current;
+    let focalX = viewW / (2 * cam.zoom) - cam.x;
+    let focalY = viewH / (2 * cam.zoom) - cam.y;
+    const currentZoom = cam.zoom;
+
+    function animate(): void {
+      const dfx = targetX - focalX;
+      const dfy = targetY - focalY;
+
+      if (Math.abs(dfx) < CAMERA_FOCAL_EPSILON && Math.abs(dfy) < CAMERA_FOCAL_EPSILON) {
+        focalX = targetX;
+        focalY = targetY;
+      } else {
+        focalX += dfx * CAMERA_LERP;
+        focalY += dfy * CAMERA_LERP;
+      }
+
+      camera.current.x = viewW / (2 * currentZoom) - focalX;
+      camera.current.y = viewH / (2 * currentZoom) - focalY;
+      draw();
+
+      if (focalX === targetX && focalY === targetY) {
+        markDirty();
+        return;
+      }
+      cameraAnimId.current = requestAnimationFrame(animate);
+    }
+
+    cameraAnimId.current = requestAnimationFrame(animate);
+  }
+
+  function executePaletteAction(actionId: string): void {
+    switch (actionId) {
+      case "new-card": {
+        const center = viewportCenter();
+        createAndStartEditingCardAt(center.x, center.y);
+        break;
+      }
+      case "new-grid":    createGrid(); break;
+      case "fit":         fitToContent(); break;
+      case "select-all":  selectAllCards(); scheduleRedraw(); break;
+      case "undo": {
+        const snapshot = undo(history.current, cards.current, selectedCardIds.current);
+        if (snapshot) applySnapshot(snapshot);
+        break;
+      }
+      case "redo": {
+        const snapshot = redo(history.current, cards.current, selectedCardIds.current);
+        if (snapshot) applySnapshot(snapshot);
+        break;
+      }
+      case "delete":
+        if (selectedCardIds.current.size > 0) {
+          runMutation({ saveSnapshot, scheduleRedraw, markDirty }, deleteSelectedCards);
+        }
+        break;
+    }
+  }
+
+  function jumpToCard(gridId: string, cardId: string): void {
+    if (gridId !== activeGridIdRef.current) {
+      syncCurrentGridBack();
+      const grid = grids.current.find((g) => g.id === gridId);
+      if (grid) activateGrid(grid);
+    }
+
+    const card = cards.current.find((c) => c.id === cardId);
+    if (!card) return;
+
+    selectedCardIds.current = new Set([cardId]);
+    const targetX = card.x + card.width / 2;
+    const targetY = card.y + card.height / 2;
+    animateCameraToPoint(targetX, targetY);
+  }
+
   function activateGrid(grid: Grid): void {
     cards.current = grid.cards;
     camera.current = { ...grid.camera };
@@ -449,10 +530,18 @@ function App(): React.JSX.Element {
     setEditing(null);
   }
 
+  function togglePalette(): void {
+    setPaletteOpen((open) => {
+      if (!open) syncCurrentGridBack();
+      return !open;
+    });
+  }
+
   useKeyboard({
-    contextMenuRef, editingRef, selectedCardIds, cards, history,
+    contextMenuRef, editingRef, paletteOpenRef, selectedCardIds, cards, history,
     setContextMenu, saveSnapshot, deleteSelectedCards,
-    selectAllCards, applySnapshot, fitToContent, copySelectedCards, pasteFromClipboard, scheduleRedraw, markDirty,
+    selectAllCards, applySnapshot, fitToContent, copySelectedCards, pasteFromClipboard,
+    togglePalette, scheduleRedraw, markDirty,
   });
 
   const {
@@ -652,6 +741,16 @@ function App(): React.JSX.Element {
             </>
           )}
         </div>
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          grids={grids}
+          activeGridId={activeGridId}
+          onClose={() => setPaletteOpen(false)}
+          onExecuteAction={executePaletteAction}
+          onSwitchGrid={switchGrid}
+          onJumpToCard={jumpToCard}
+        />
       )}
     </>
   );

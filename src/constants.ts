@@ -58,3 +58,5 @@ export const CAMERA_ZOOM_EPSILON = 0.001;
 export const FIT_PADDING = 80;
 
 export const MAX_UNDO = 100;
+
+export const PALETTE_MAX_RESULTS = 12;

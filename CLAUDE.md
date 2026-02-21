@@ -48,6 +48,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 - **`src/components/`** — React components
   - `App.tsx` — Canvas app: state declarations, card CRUD, editor, history/persistence, grid management, rendering
   - `Sidebar.tsx` — Grid list sidebar component
+  - `CommandPalette.tsx` — Ctrl+K command palette (fuzzy search across cards, grids, actions)
 - **`src/hooks/`** — React hooks
   - `useKeyboard.ts` — Keyboard shortcut hook (undo/redo, delete, nudge, select-all, fit-to-content, copy/paste)
   - `useCanvasInteractions.ts` — Mouse/wheel/space-key event handling hook (drag, resize, box-select, pan, zoom)
@@ -57,6 +58,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
   - `history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
   - `mutation.ts` — `runMutation(deps, action)` helper: saveSnapshot → action → scheduleRedraw → markDirty
   - `menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
+  - `fuzzySearch.ts` — Fuzzy scoring and filtering (used by command palette)
   - `persistence.ts` — Workspace save/load via Electron IPC (`window.electronAPI`)
 
 ### Rendering Pipeline
@@ -64,12 +66,12 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 - All visuals are drawn imperatively via Canvas 2D in the `draw()` callback
 - `scheduleRedraw()` must be called after every ref mutation that affects visuals — it debounces via `requestAnimationFrame`
 - Continuous animation loops (drag/resize lerp) call `draw()` directly and manage their own RAF cycle, separate from `scheduleRedraw()`
-- React-rendered DOM overlays (card editor `<input>`, context menu `<div>`) are positioned absolutely over the canvas at screen coordinates
+- React-rendered DOM overlays are positioned absolutely over the canvas at screen coordinates (z-index: editor 10, context menu 20, command palette 30)
 
 ### State
 
 - Workspace (grids, cards, cameras) persists to Electron userData via `src/lib/persistence.ts` with 2s debounced save and v1→v2→v3 migration
-- Card editor is a single-line `<input>`, not multi-line
+- Active grid's cards live in `cards.current` ref, not in `grids.current[i].cards` — call `syncCurrentGridBack()` before reading cross-grid data
 
 ### Coordinate System
 
@@ -104,6 +106,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 - Use `runMutation(deps, action)` for the standard snapshot→mutate→redraw→dirty workflow; drag/resize capture snapshot at mousedown, not per frame
 - `removeCard()` is a low-level helper — callers push snapshots, not `removeCard` itself
 - Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; Delete/Backspace deletes selected; Ctrl+A selects all; Ctrl+C/V copy/paste; arrow keys nudge by `NUDGE_AMOUNT` px
+- Ctrl+K toggles command palette; `useKeyboard` processes Ctrl+K before all other guards so it works even during editing
 
 ### Context Menu
 
@@ -113,6 +116,12 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 - Ctrl+V prefers internal clipboard; falls back to system clipboard text → new card
 - Pasted cards are offset by `DUPLICATE_OFFSET` to avoid overlapping originals
 - Menu closes on: left-click, Escape, scroll/zoom
+
+### Camera Animation
+
+- `animateCameraToPoint(x, y)` smoothly pans to a world-space point using the CAMERA_LERP/CAMERA_FOCAL_EPSILON RAF loop
+- `fitToContent()` uses the same pattern but also animates zoom
+- New features needing camera animation should reuse `animateCameraToPoint` rather than duplicating the loop
 
 ### Snap-to-Grid
 

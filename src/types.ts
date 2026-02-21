@@ -88,3 +88,30 @@ export interface GridSummary {
   name: string;
   cardCount: number;
 }
+
+export interface PaletteActionItem {
+  kind: "action";
+  id: string;
+  label: string;
+  shortcut?: string;
+}
+
+export interface PaletteGridItem {
+  kind: "grid";
+  id: string;
+  label: string;
+  isActive: boolean;
+  cardCount: number;
+}
+
+export interface PaletteCardItem {
+  kind: "card";
+  id: string;
+  gridId: string;
+  gridName: string;
+  label: string;
+  body: string;
+  color: string;
+}
+
+export type PaletteItem = PaletteActionItem | PaletteGridItem | PaletteCardItem;

@@ -15,6 +15,7 @@ const NUDGE_DIR: Record<string, Point> = {
 export interface KeyboardDeps {
   contextMenuRef: React.RefObject<ContextMenuState | null>;
   editingRef: React.RefObject<EditingState | null>;
+  paletteOpenRef: React.RefObject<boolean>;
   selectedCardIds: React.RefObject<Set<string>>;
   cards: React.RefObject<Card[]>;
   history: React.RefObject<History>;
@@ -26,6 +27,7 @@ export interface KeyboardDeps {
   fitToContent: () => void;
   copySelectedCards: () => void;
   pasteFromClipboard: () => void;
+  togglePalette: () => void;
   scheduleRedraw: () => void;
   markDirty: () => void;
 }
@@ -37,13 +39,16 @@ export function useKeyboard(deps: KeyboardDeps): void {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
       const d = depsRef.current;
+      const mod = e.ctrlKey || e.metaKey;
+
+      if (e.key === "k" && mod) { e.preventDefault(); d.togglePalette(); return; }
+
       if (d.contextMenuRef.current) {
         if (e.key === "Escape") d.setContextMenu(null);
         return;
       }
       if (d.editingRef.current) return;
-
-      const mod = e.ctrlKey || e.metaKey;
+      if (d.paletteOpenRef.current) return;
 
       if ((e.key === "Delete" || e.key === "Backspace") && d.selectedCardIds.current.size > 0) {
         runMutation(d, d.deleteSelectedCards);
