@@ -775,6 +775,7 @@ function App(): React.JSX.Element {
       }
     }
     cardScrollOffsets.current.delete(editing.cardId);
+    editingRef.current = null;
     setEditing(null);
     scheduleRedraw();
     markDirty();
@@ -786,10 +787,11 @@ function App(): React.JSX.Element {
     if (card && card.text === "") {
       saveSnapshot();
       removeCard(editing.cardId);
-      scheduleRedraw();
       markDirty();
     }
+    editingRef.current = null;
     setEditing(null);
+    scheduleRedraw();
   }
 
   function togglePalette(): void {
