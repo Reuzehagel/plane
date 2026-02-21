@@ -3,6 +3,7 @@ import type { Card, ContextMenuState, EditingState, History, Point, Snapshot } f
 import { undo, redo } from "./history";
 import { NUDGE_AMOUNT } from "./constants";
 import { snapToGrid } from "./geometry";
+import { runMutation } from "./mutation";
 
 const NUDGE_DIR: Record<string, Point> = {
   ArrowLeft:  { x: -NUDGE_AMOUNT, y: 0 },
@@ -43,10 +44,7 @@ export function useKeyboard(deps: KeyboardDeps): void {
       const mod = e.ctrlKey || e.metaKey;
 
       if ((e.key === "Delete" || e.key === "Backspace") && d.selectedCardIds.current.size > 0) {
-        d.saveSnapshot();
-        d.deleteSelectedCards();
-        d.scheduleRedraw();
-        d.markDirty();
+        runMutation(d, d.deleteSelectedCards);
         return;
       }
 
@@ -79,15 +77,14 @@ export function useKeyboard(deps: KeyboardDeps): void {
 
       const offset = NUDGE_DIR[e.key];
       if (offset && d.selectedCardIds.current.size > 0) {
-        d.saveSnapshot();
-        for (const card of d.cards.current) {
-          if (d.selectedCardIds.current.has(card.id)) {
-            card.x = snapToGrid(card.x + offset.x);
-            card.y = snapToGrid(card.y + offset.y);
+        runMutation(d, () => {
+          for (const card of d.cards.current) {
+            if (d.selectedCardIds.current.has(card.id)) {
+              card.x = snapToGrid(card.x + offset.x);
+              card.y = snapToGrid(card.y + offset.y);
+            }
           }
-        }
-        d.scheduleRedraw();
-        d.markDirty();
+        });
         e.preventDefault();
       }
     }

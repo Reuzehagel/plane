@@ -2,6 +2,7 @@ import type React from "react";
 import type { Card, ContextMenuState } from "./types";
 import { CARD_WIDTH, CARD_HEIGHT, DUPLICATE_OFFSET } from "./constants";
 import { snapPoint } from "./geometry";
+import { runMutation } from "./mutation";
 
 export interface MenuHandlerDeps {
   contextMenu: ContextMenuState | null;
@@ -41,11 +42,8 @@ function closeMenu(deps: MenuHandlerDeps): void {
 }
 
 function runMenuAction(deps: MenuHandlerDeps, action: () => void): void {
-  deps.saveSnapshot();
-  action();
+  runMutation(deps, action);
   closeMenu(deps);
-  deps.scheduleRedraw();
-  deps.markDirty();
 }
 
 export function createMenuHandlers(deps: MenuHandlerDeps): MenuHandlers {

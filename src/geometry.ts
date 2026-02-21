@@ -5,6 +5,13 @@ function pointInRect(px: number, py: number, x: number, y: number, w: number, h:
   return px >= x && px <= x + w && py >= y && py <= y + h;
 }
 
+export function rectsIntersect(
+  ax: number, ay: number, aw: number, ah: number,
+  bx: number, by: number, bw: number, bh: number,
+): boolean {
+  return ax + aw > bx && ax < bx + bw && ay + ah > by && ay < by + bh;
+}
+
 export function screenToWorld(sx: number, sy: number, cam: Camera): Point {
   return {
     x: sx / cam.zoom - cam.x,
@@ -63,12 +70,12 @@ export function getContentBounds(cards: Card[]): Bounds | null {
 
 export function isContentVisible(cards: Card[], cam: Camera, viewW: number, viewH: number): boolean {
   if (cards.length === 0) return true;
-  const vLeft = -cam.x;
-  const vTop = -cam.y;
-  const vRight = vLeft + viewW / cam.zoom;
-  const vBottom = vTop + viewH / cam.zoom;
+  const vx = -cam.x;
+  const vy = -cam.y;
+  const vw = viewW / cam.zoom;
+  const vh = viewH / cam.zoom;
   for (const c of cards) {
-    if (c.x + c.width > vLeft && c.x < vRight && c.y + c.height > vTop && c.y < vBottom) {
+    if (rectsIntersect(c.x, c.y, c.width, c.height, vx, vy, vw, vh)) {
       return true;
     }
   }
