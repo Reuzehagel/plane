@@ -30,6 +30,7 @@ export interface InteractionDeps {
   spaceHeld: React.RefObject<boolean>;
   editingRef: React.RefObject<EditingState | null>;
   contextMenuRef: React.RefObject<ContextMenuState | null>;
+  cardScrollOffsets: React.RefObject<Map<string, number>>;
   draw: () => void;
   scheduleRedraw: () => void;
   saveSnapshot: () => void;
@@ -38,6 +39,8 @@ export interface InteractionDeps {
   openEditor: (card: Card) => void;
   createAndStartEditingCardAt: (wx: number, wy: number) => void;
   setContextMenu: (v: ContextMenuState | null) => void;
+  syncEditorPosition: () => void;
+  getCardMaxScroll: (cardId: string) => number;
 }
 
 export function useCanvasInteractions(deps: InteractionDeps): void {
@@ -66,6 +69,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
     const spaceHeldRef = depsRef.current.spaceHeld;
     const editingRef = depsRef.current.editingRef;
     const contextMenuRef = depsRef.current.contextMenuRef;
+    const cardScrollOffsetsRef = depsRef.current.cardScrollOffsets;
 
     let canvasRect = canvas.getBoundingClientRect();
 
@@ -159,16 +163,17 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
     }
 
     function onMouseDown(e: MouseEvent): void {
+      // Allow middle-click panning even while editing
+      if (e.button === 1) {
+        startPanning(e);
+        e.preventDefault();
+        return;
+      }
+
       if (editingRef.current) return;
 
       if (contextMenuRef.current) {
         depsRef.current.setContextMenu(null);
-        return;
-      }
-
-      if (e.button === 1) {
-        startPanning(e);
-        e.preventDefault();
         return;
       }
 
@@ -279,6 +284,7 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
         cameraRef.current.y += dy / cameraRef.current.zoom;
         lastMouseRef.current = { x: e.clientX, y: e.clientY };
         depsRef.current.scheduleRedraw();
+        if (editingRef.current) depsRef.current.syncEditorPosition();
         return;
       }
 
@@ -348,22 +354,54 @@ export function useCanvasInteractions(deps: InteractionDeps): void {
     }
 
     function onWheel(e: WheelEvent): void {
-      if (editingRef.current) return;
       e.preventDefault();
       if (contextMenuRef.current) depsRef.current.setContextMenu(null);
 
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+scroll → zoom
+        const { zoom } = cameraRef.current;
+        const delta = -e.deltaY * ZOOM_SENSITIVITY;
+        const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + delta)));
+
+        const { x: mx, y: my } = mouseToScreen(e, canvasRect);
+
+        cameraRef.current.x += mx / newZoom - mx / zoom;
+        cameraRef.current.y += my / newZoom - my / zoom;
+        cameraRef.current.zoom = newZoom;
+
+        depsRef.current.scheduleRedraw();
+        depsRef.current.markDirty();
+        if (editingRef.current) depsRef.current.syncEditorPosition();
+        return;
+      }
+
+      // Regular scroll → scroll selected card text if hovering one with overflow
+      if (!editingRef.current) {
+        const world = mouseToWorld(e, canvasRect, cameraRef.current);
+        const hit = hitTestCards(world.x, world.y, cardsRef.current);
+        if (hit && selectedCardIdsRef.current.has(hit.id)) {
+          const maxScroll = depsRef.current.getCardMaxScroll(hit.id);
+          if (maxScroll > 0) {
+            const current = cardScrollOffsetsRef.current.get(hit.id) ?? 0;
+            const newOffset = Math.max(0, Math.min(maxScroll, current + e.deltaY * 0.5));
+            cardScrollOffsetsRef.current.set(hit.id, newOffset);
+            depsRef.current.scheduleRedraw();
+            return;
+          }
+        }
+      }
+
+      // Default: pan canvas
       const { zoom } = cameraRef.current;
-      const delta = -e.deltaY * ZOOM_SENSITIVITY;
-      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + delta)));
-
-      const { x: mx, y: my } = mouseToScreen(e, canvasRect);
-
-      cameraRef.current.x += mx / newZoom - mx / zoom;
-      cameraRef.current.y += my / newZoom - my / zoom;
-      cameraRef.current.zoom = newZoom;
-
+      cameraRef.current.x -= e.deltaX / zoom;
+      if (e.shiftKey) {
+        cameraRef.current.x -= e.deltaY / zoom;
+      } else {
+        cameraRef.current.y -= e.deltaY / zoom;
+      }
       depsRef.current.scheduleRedraw();
       depsRef.current.markDirty();
+      if (editingRef.current) depsRef.current.syncEditorPosition();
     }
 
     function onKeyDown(e: KeyboardEvent): void {

@@ -1,4 +1,3 @@
-import { readTextFile, writeTextFile, mkdir, exists, BaseDirectory } from "@tauri-apps/plugin-fs";
 import type { Card, Grid } from "../types";
 import { DEFAULT_CARD_COLOR } from "../constants";
 
@@ -39,7 +38,6 @@ type WorkspaceFile = WorkspaceFileV1 | WorkspaceFileV2 | WorkspaceFileV3;
 
 const DIR = "com.nick.plane";
 const FILE = `${DIR}/workspace.json`;
-const BASE = BaseDirectory.AppData;
 
 function backfillCardColors(cards: Array<Card & { color?: string }>): Card[] {
   return cards.map((c) => ({
@@ -75,7 +73,7 @@ function migrateV2(data: WorkspaceFileV2): WorkspaceData {
       ...g,
       cards: backfillCardColors(g.cards.map((c) => ({
         ...c,
-        text: (c as Card & { title?: string }).title ?? c.text ?? "",
+        text: c.title ?? c.text ?? "",
       }))),
     })),
     activeGridId: data.activeGridId,
@@ -94,10 +92,10 @@ function parseV3(data: WorkspaceFileV3): WorkspaceData {
 
 export async function loadWorkspace(): Promise<WorkspaceData> {
   try {
-    if (!(await exists(FILE, { baseDir: BASE }))) {
+    if (!(await window.electronAPI.exists(FILE))) {
       return defaultWorkspace();
     }
-    const raw = await readTextFile(FILE, { baseDir: BASE });
+    const raw = await window.electronAPI.readTextFile(FILE);
     const data: WorkspaceFile = JSON.parse(raw);
 
     switch (data.version) {
@@ -114,7 +112,7 @@ export async function loadWorkspace(): Promise<WorkspaceData> {
 
 export async function saveWorkspace(grids: Grid[], activeGridId: string): Promise<void> {
   try {
-    await mkdir(DIR, { baseDir: BASE, recursive: true });
+    await window.electronAPI.mkdir(DIR);
     const data: WorkspaceFileV3 = {
       version: 3,
       grids: grids.map(({ id, name, cards, camera }) => ({
@@ -125,7 +123,7 @@ export async function saveWorkspace(grids: Grid[], activeGridId: string): Promis
       })),
       activeGridId,
     };
-    await writeTextFile(FILE, JSON.stringify(data, null, 2), { baseDir: BASE });
+    await window.electronAPI.writeTextFile(FILE, JSON.stringify(data, null, 2));
   } catch (e) {
     console.error("Failed to save workspace:", e);
   }

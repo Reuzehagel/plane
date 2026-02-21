@@ -51,6 +51,7 @@ export function drawScene(
   selectedCardIds: Set<string>,
   boxSelect: BoxSelectState | null,
   editingCardId: string | null = null,
+  cardScrollOffsets: Map<string, number> = new Map(),
 ): void {
   const { x: camX, y: camY, zoom } = camera;
 
@@ -137,6 +138,13 @@ export function drawScene(
       const textPad = CARD_TEXT_PAD * zoom;
       const lineH = LINE_HEIGHT * zoom;
       const textX = sx + textPad;
+      let truncatedBottom = false;
+      let truncatedTop = false;
+
+      const totalTextH = lines.length * lineH;
+      const visibleTextH = sh - accentH - textPad * 2;
+      const overflows = lines.length > 1 && totalTextH > visibleTextH;
+      const scrollPx = (cardScrollOffsets.get(card.id) ?? 0) * zoom;
 
       if (lines.length === 1) {
         // Single line: vertically centered, uppercase, accent color
@@ -144,17 +152,74 @@ export function drawScene(
         ctx.textBaseline = "middle";
         ctx.fillText(lines[0].text.toUpperCase(), textX, sy + sh / 2);
       } else {
-        const startY = sy + accentH + textPad;
+        const textStartY = sy + accentH + textPad - scrollPx;
+        const topLimit = sy + accentH;
         const bottomLimit = sy + sh - textPad;
         for (let i = 0; i < lines.length; i++) {
-          const lineY = startY + i * lineH;
-          if (lineY + lineH > bottomLimit + lineH * 0.5) break;
+          const lineY = textStartY + i * lineH;
+          if (lineY + lineH < topLimit) {
+            truncatedTop = true;
+            continue;
+          }
+          if (lineY + lineH > bottomLimit + lineH * 0.5) {
+            truncatedBottom = true;
+            break;
+          }
           const line = lines[i];
           ctx.fillStyle = line.isHeader ? card.color : CARD_BODY_COLOR;
           ctx.fillText(line.isHeader ? line.text.toUpperCase() : line.text, textX, lineY);
         }
       }
       ctx.restore();
+
+      if (overflows) {
+        ctx.save();
+        ctx.clip(path);
+
+        // Fade gradient at bottom
+        if (truncatedBottom) {
+          const fadeH = lineH * 2;
+          const fadeY = sy + sh - fadeH;
+          const fadeGrad = ctx.createLinearGradient(0, fadeY, 0, sy + sh);
+          fadeGrad.addColorStop(0, "rgba(20, 20, 20, 0)");
+          fadeGrad.addColorStop(1, CARD_BG);
+          ctx.fillStyle = fadeGrad;
+          ctx.fillRect(sx, fadeY, sw, fadeH);
+        }
+
+        // Fade gradient at top (when scrolled down)
+        if (truncatedTop) {
+          const fadeH = lineH * 1.5;
+          const fadeY = sy + accentH;
+          const fadeGrad = ctx.createLinearGradient(0, fadeY, 0, fadeY + fadeH);
+          fadeGrad.addColorStop(0, CARD_BG);
+          fadeGrad.addColorStop(1, "rgba(20, 20, 20, 0)");
+          ctx.fillStyle = fadeGrad;
+          ctx.fillRect(sx, fadeY, sw, fadeH);
+        }
+
+        // Scrollbar indicator
+        const barW = Math.max(2, 3 * zoom);
+        const barPad = 4 * zoom;
+        const barX = sx + sw - barW - barPad;
+        const trackTop = sy + accentH + textPad;
+        const trackH = sh - accentH - textPad * 2;
+        const visibleRatio = Math.min(1, visibleTextH / totalTextH);
+        const thumbH = Math.max(8 * zoom, trackH * visibleRatio);
+
+        const maxScrollWorld = (totalTextH - visibleTextH) / zoom;
+        const scrollOffset = cardScrollOffsets.get(card.id) ?? 0;
+        const scrollRatio = maxScrollWorld > 0 ? Math.min(1, scrollOffset / maxScrollWorld) : 0;
+        const thumbY = trackTop + scrollRatio * (trackH - thumbH);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.fillRect(barX, trackTop, barW, trackH);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.fillRect(barX, thumbY, barW, thumbH);
+
+        ctx.restore();
+      }
     }
   }
 

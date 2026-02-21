@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Always use `bun`, never `npx` or `node_modules/.bin`
 
-- `just dev` — run Tauri + frontend dev server (Note, don't use this unless told to.)
-- `just build` — build release binary
+- `just dev` — run Electron + Vite dev server (Note, don't use this unless told to.)
+- `just build` — build frontend + Electron
 - `just check` — type-check (`bun run tsc --noEmit`)
 - `just frontend` — frontend dev server only
 - `just install` — install dependencies (`bun install`)
@@ -15,9 +15,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-- Tauri 2 + React 19 + TypeScript + Vite
+- Electron + React 19 + TypeScript + Vite (via `vite-plugin-electron`)
 - Canvas 2D rendering (not DOM-based UI) with infinite pan/zoom
-- Rust backend in `src-tauri/` (currently minimal — just the Tauri shell)
+- Electron main/preload in `electron/` — IPC-based file persistence scoped to `app.getPath('userData')`
+- `"type": "module"` in package.json → main process is ESM (no `__dirname`, use `import.meta.url`)
+- Must use `vite-plugin-electron/simple` (not flat API) — it builds preload as CJS (`.mjs`), main as ESM (`.js`)
 - `justfile` uses PowerShell on Windows
 
 ## Code Style
@@ -36,6 +38,10 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 
 ### Modules
 
+- **`electron/`** — Electron process files (built by `vite-plugin-electron` into `dist-electron/`)
+  - `main.ts` — Main process: BrowserWindow, IPC handlers for fs ops; uses `import.meta.url` for `__dirname` (ESM build)
+  - `preload.ts` — Preload: exposes `window.electronAPI` via `contextBridge`
+- `src/types/electron.d.ts` — Type declaration for `window.electronAPI`
 - `src/main.tsx` — React entry point
 - `src/types.ts` — All shared interfaces and type aliases
 - `src/constants.ts` — Visual and behavior constants
@@ -51,7 +57,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
   - `history.ts` — Undo/redo snapshot logic (pushSnapshot, undo, redo)
   - `mutation.ts` — `runMutation(deps, action)` helper: saveSnapshot → action → scheduleRedraw → markDirty
   - `menuHandlers.ts` — Context menu action handlers (edit, duplicate, copy, reset size, paste, delete, new card)
-  - `persistence.ts` — Workspace save/load via Tauri AppData
+  - `persistence.ts` — Workspace save/load via Electron IPC (`window.electronAPI`)
 
 ### Rendering Pipeline
 
@@ -62,7 +68,7 @@ The app is a single `App` component (`src/components/App.tsx`) that owns a full-
 
 ### State
 
-- Workspace (grids, cards, cameras) persists to Tauri AppData via `src/lib/persistence.ts` with 2s debounced save and v1→v2 migration
+- Workspace (grids, cards, cameras) persists to Electron userData via `src/lib/persistence.ts` with 2s debounced save and v1→v2→v3 migration
 - Card editor is a single-line `<input>`, not multi-line
 
 ### Coordinate System

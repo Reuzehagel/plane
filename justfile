@@ -2,11 +2,11 @@ set shell := ["powershell", "-NoProfile", "-Command"]
 
 # Development
 dev:
-    bun run tauri dev
+    bun run dev
 
 # Build release binary
 build:
-    bun run tauri build
+    bun run build
 
 # Install dependencies
 install:

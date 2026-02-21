@@ -5,7 +5,7 @@ import { screenToWorld, worldToScreen, snapPoint, getContentBounds, getBoundsCen
 import { drawScene } from "../lib/rendering";
 import { pushSnapshot } from "../lib/history";
 import {
-  MIN_ZOOM, MAX_ZOOM,
+  MIN_ZOOM, MAX_ZOOM, ZOOM_SENSITIVITY,
   CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS,
   CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_COLORS, DUPLICATE_OFFSET,
   CARD_ACCENT_HEIGHT, LINE_HEIGHT, CARD_BODY_COLOR,
@@ -16,7 +16,7 @@ import { useCanvasInteractions } from "../hooks/useCanvasInteractions";
 import { createMenuHandlers } from "../lib/menuHandlers";
 import { runMutation } from "../lib/mutation";
 import { loadWorkspace, saveWorkspace } from "../lib/persistence";
-import { computeCardHeight } from "../lib/textLayout";
+import { computeCardHeight, wrapText } from "../lib/textLayout";
 import { Sidebar } from "./Sidebar";
 import { LocateFixed } from "lucide-react";
 
@@ -52,6 +52,7 @@ function App(): React.JSX.Element {
   const [editing, editingRef, setEditing] = useRefState<EditingState | null>(null);
   const [contextMenu, contextMenuRef, setContextMenu] = useRefState<ContextMenuState | null>(null);
   const clipboard = useRef<Card[]>([]);
+  const cardScrollOffsets = useRef<Map<string, number>>(new Map());
 
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const headerInputRef = useRef<HTMLInputElement>(null);
@@ -92,7 +93,7 @@ function App(): React.JSX.Element {
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
-    drawScene(ctxRef.current, dpr, w, h, camera.current, cards.current, selectedCardIds.current, boxSelect.current, editingRef.current?.cardId ?? null);
+    drawScene(ctxRef.current, dpr, w, h, camera.current, cards.current, selectedCardIds.current, boxSelect.current, editingRef.current?.cardId ?? null, cardScrollOffsets.current);
     setContentOffscreen(!isContentVisible(cards.current, camera.current, w, h));
   }, []);
 
@@ -199,6 +200,23 @@ function App(): React.JSX.Element {
     editingRef.current = state;
     setEditing(state);
     scheduleRedraw();
+  }
+
+  function syncEditorPosition(): void {
+    if (!editingRef.current) return;
+    const card = findCard(editingRef.current.cardId);
+    if (!card) return;
+    const { x: sx, y: sy } = worldToScreen(card.x, card.y, camera.current);
+    const zoom = camera.current.zoom;
+    const state: EditingState = {
+      cardId: card.id,
+      screenX: sx,
+      screenY: sy,
+      screenWidth: card.width * zoom,
+      screenHeight: card.height * zoom,
+    };
+    editingRef.current = state;
+    setEditing(state);
   }
 
   function createAndStartEditingCardAt(worldX: number, worldY: number): void {
@@ -362,9 +380,10 @@ function App(): React.JSX.Element {
     canvasRef, camera, isPanning, lastMouse, cards,
     dragState, resizeState, selectedCardIds, boxSelect,
     dragSnapTargets, dragRafId, resizeTarget, resizeRafId,
-    spaceHeld, editingRef, contextMenuRef,
+    spaceHeld, editingRef, contextMenuRef, cardScrollOffsets,
     draw, scheduleRedraw, saveSnapshot, markDirty,
     selectCard, openEditor, createAndStartEditingCardAt, setContextMenu,
+    syncEditorPosition, getCardMaxScroll,
   });
 
   useEffect(() => {
@@ -380,6 +399,20 @@ function App(): React.JSX.Element {
       ctx.font = `${CARD_FONT_SIZE}px ${CARD_TITLE_FONT}`;
       card.height = computeCardHeight(ctx, card.text, card.width);
     }
+  }
+
+  function getCardMaxScroll(cardId: string): number {
+    const card = findCard(cardId);
+    if (!card) return 0;
+    const ctx = ctxRef.current;
+    if (!ctx) return 0;
+    ctx.font = `${CARD_FONT_SIZE}px ${CARD_TITLE_FONT}`;
+    const maxWidth = card.width - CARD_TEXT_PAD * 2;
+    const lines = wrapText(ctx, card.text, maxWidth);
+    if (lines.length <= 1) return 0;
+    const totalH = lines.length * LINE_HEIGHT;
+    const visibleH = card.height - CARD_ACCENT_HEIGHT - CARD_TEXT_PAD * 2;
+    return Math.max(0, totalH - visibleH);
   }
 
   function commitEdit(): void {
@@ -398,6 +431,7 @@ function App(): React.JSX.Element {
         recalculateCardHeight(card);
       }
     }
+    cardScrollOffsets.current.delete(editing.cardId);
     setEditing(null);
     scheduleRedraw();
     markDirty();
@@ -468,6 +502,32 @@ function App(): React.JSX.Element {
           commitEdit();
         }
 
+        function handleEditorWheel(e: React.WheelEvent): void {
+          if (!e.ctrlKey && !e.metaKey) return;
+          const { zoom } = camera.current;
+          const delta = -e.deltaY * ZOOM_SENSITIVITY;
+          const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + delta)));
+          const rect = canvasRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          camera.current.x += mx / newZoom - mx / zoom;
+          camera.current.y += my / newZoom - my / zoom;
+          camera.current.zoom = newZoom;
+          syncEditorPosition();
+          scheduleRedraw();
+          markDirty();
+        }
+
+        function handleEditorMiddleClick(e: React.MouseEvent): void {
+          if (e.button === 1) {
+            e.preventDefault();
+            isPanning.current = true;
+            lastMouse.current = { x: e.clientX, y: e.clientY };
+            if (canvasRef.current) canvasRef.current.style.cursor = "grabbing";
+          }
+        }
+
         function handleEditorKeyDown(e: React.KeyboardEvent): void {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             commitEdit();
@@ -497,6 +557,8 @@ function App(): React.JSX.Element {
           <div
             ref={editorContainerRef}
             className="card-editor"
+            onWheel={handleEditorWheel}
+            onMouseDown={handleEditorMiddleClick}
             style={{
               left: editing.screenX,
               top: editing.screenY,

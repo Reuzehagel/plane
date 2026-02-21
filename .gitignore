@@ -11,10 +11,8 @@ bun.lock
 .DS_Store
 Thumbs.db
 
-# Tauri
-src-tauri/target/
-src-tauri/WixTools/
-src-tauri/Frameworks/
+# Electron
+dist-electron/
 
 # Env
 .env
