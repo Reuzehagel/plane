@@ -1,5 +1,5 @@
-import type { Camera, Card, HandleCorner, Point } from "../types";
-import { DOT_SPACING, HANDLE_HIT_SIZE, SNAP_LERP, SNAP_EPSILON } from "../constants";
+import type { Camera, Card, Frame, HandleCorner, Point } from "../types";
+import { DOT_SPACING, HANDLE_HIT_SIZE, SNAP_LERP, SNAP_EPSILON, FRAME_LABEL_FONT_SIZE, FRAME_LABEL_OFFSET_Y } from "../constants";
 
 function pointInRect(px: number, py: number, x: number, y: number, w: number, h: number): boolean {
   return px >= x && px <= x + w && py >= y && py <= y + h;
@@ -56,16 +56,29 @@ export interface Bounds {
   maxY: number;
 }
 
-export function getContentBounds(cards: Card[]): Bounds | null {
-  if (cards.length === 0) return null;
+export function getRectBounds(
+  items: ReadonlyArray<{ x: number; y: number; width: number; height: number }>,
+): Bounds | null {
+  if (items.length === 0) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const c of cards) {
-    if (c.x < minX) minX = c.x;
-    if (c.y < minY) minY = c.y;
-    if (c.x + c.width > maxX) maxX = c.x + c.width;
-    if (c.y + c.height > maxY) maxY = c.y + c.height;
+  for (const r of items) {
+    if (r.x < minX) minX = r.x;
+    if (r.y < minY) minY = r.y;
+    if (r.x + r.width > maxX) maxX = r.x + r.width;
+    if (r.y + r.height > maxY) maxY = r.y + r.height;
   }
   return { minX, minY, maxX, maxY };
+}
+
+export function mergeBounds(a: Bounds | null, b: Bounds | null): Bounds | null {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    minX: Math.min(a.minX, b.minX),
+    minY: Math.min(a.minY, b.minY),
+    maxX: Math.max(a.maxX, b.maxX),
+    maxY: Math.max(a.maxY, b.maxY),
+  };
 }
 
 export function getBoundsCenter(bounds: Bounds): Point {
@@ -104,27 +117,79 @@ export function getCardCorners(sx: number, sy: number, sw: number, sh: number): 
   return [[sx, sy], [sx + sw, sy], [sx, sy + sh], [sx + sw, sy + sh]];
 }
 
-export function hitTestHandles(
+export function hitTestRectHandles<T extends { id: string; x: number; y: number; width: number; height: number }>(
   screenX: number,
   screenY: number,
-  cards: Card[],
-  selectedCardIds: Set<string>,
+  items: T[],
+  selectedIds: Set<string>,
   cam: Camera,
-): { card: Card; handle: HandleCorner } | null {
+): { item: T; handle: HandleCorner } | null {
   const half = HANDLE_HIT_SIZE / 2;
-  for (let i = cards.length - 1; i >= 0; i--) {
-    const card = cards[i];
-    if (!selectedCardIds.has(card.id)) continue;
-    const { x: sx, y: sy } = worldToScreen(card.x, card.y, cam);
-    const sw = card.width * cam.zoom;
-    const sh = card.height * cam.zoom;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (!selectedIds.has(item.id)) continue;
+    const { x: sx, y: sy } = worldToScreen(item.x, item.y, cam);
+    const sw = item.width * cam.zoom;
+    const sh = item.height * cam.zoom;
     const corners = getCardCorners(sx, sy, sw, sh);
     for (let j = 0; j < corners.length; j++) {
       const [cx, cy] = corners[j];
       if (pointInRect(screenX, screenY, cx - half, cy - half, HANDLE_HIT_SIZE, HANDLE_HIT_SIZE)) {
-        return { card, handle: HANDLE_CORNERS[j] };
+        return { item, handle: HANDLE_CORNERS[j] };
       }
     }
   }
   return null;
 }
+
+// Frame border hit-test: returns true if point is on the border strip
+export function hitTestFrameBorder(wx: number, wy: number, frame: Frame, thickness: number): boolean {
+  const outer = pointInRect(wx, wy, frame.x, frame.y, frame.width, frame.height);
+  if (!outer) return false;
+  const inner = pointInRect(
+    wx, wy,
+    frame.x + thickness, frame.y + thickness,
+    frame.width - thickness * 2, frame.height - thickness * 2,
+  );
+  return !inner;
+}
+
+// Frame label hit-test: label area above frame top-left
+export function hitTestFrameLabel(wx: number, wy: number, frame: Frame): boolean {
+  const labelH = FRAME_LABEL_FONT_SIZE + 4;
+  const labelW = Math.max(80, frame.label.length * FRAME_LABEL_FONT_SIZE * 0.7);
+  return pointInRect(
+    wx, wy,
+    frame.x, frame.y + FRAME_LABEL_OFFSET_Y - labelH,
+    labelW, labelH,
+  );
+}
+
+// Hit-test frames back-to-front, tests border + label
+export function hitTestFrames(wx: number, wy: number, frames: Frame[], borderThickness: number): Frame | null {
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const f = frames[i];
+    if (hitTestFrameBorder(wx, wy, f, borderThickness) || hitTestFrameLabel(wx, wy, f)) {
+      return f;
+    }
+  }
+  return null;
+}
+
+
+// Returns cards whose bounding box is fully contained within the frame
+export function getCardsInFrame(frame: Frame, cards: Card[]): Card[] {
+  const result: Card[] = [];
+  for (const c of cards) {
+    if (
+      c.x >= frame.x &&
+      c.y >= frame.y &&
+      c.x + c.width <= frame.x + frame.width &&
+      c.y + c.height <= frame.y + frame.height
+    ) {
+      result.push(c);
+    }
+  }
+  return result;
+}
+

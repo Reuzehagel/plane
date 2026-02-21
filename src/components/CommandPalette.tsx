@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import type { Grid, PaletteActionItem, PaletteCardItem, PaletteGridItem, PaletteItem } from "../types";
+import type { Grid, PaletteActionItem, PaletteCardItem, PaletteFrameItem, PaletteGridItem, PaletteItem } from "../types";
 import { PALETTE_MAX_RESULTS } from "../constants";
 import { filterAndSort } from "../lib/fuzzySearch";
 
@@ -10,19 +10,22 @@ interface CommandPaletteProps {
   onExecuteAction: (actionId: string) => void;
   onSwitchGrid: (gridId: string) => void;
   onJumpToCard: (gridId: string, cardId: string) => void;
+  onJumpToFrame: (gridId: string, frameId: string) => void;
 }
 
 const ACTIONS: PaletteActionItem[] = [
-  { kind: "action", id: "new-card",    label: "New Card",        shortcut: "Dbl-click" },
+  { kind: "action", id: "new-card",    label: "New Card",            shortcut: "Dbl-click" },
   { kind: "action", id: "new-grid",    label: "New Grid" },
-  { kind: "action", id: "fit",         label: "Fit to Content",  shortcut: "Ctrl+1" },
-  { kind: "action", id: "select-all",  label: "Select All",      shortcut: "Ctrl+A" },
-  { kind: "action", id: "undo",        label: "Undo",            shortcut: "Ctrl+Z" },
-  { kind: "action", id: "redo",        label: "Redo",            shortcut: "Ctrl+Shift+Z" },
-  { kind: "action", id: "delete",      label: "Delete Selected", shortcut: "Del" },
+  { kind: "action", id: "new-frame",   label: "New Frame" },
+  { kind: "action", id: "present",     label: "Start Presentation",  shortcut: "F5" },
+  { kind: "action", id: "fit",         label: "Fit to Content",      shortcut: "Ctrl+1" },
+  { kind: "action", id: "select-all",  label: "Select All",          shortcut: "Ctrl+A" },
+  { kind: "action", id: "undo",        label: "Undo",                shortcut: "Ctrl+Z" },
+  { kind: "action", id: "redo",        label: "Redo",                shortcut: "Ctrl+Shift+Z" },
+  { kind: "action", id: "delete",      label: "Delete Selected",     shortcut: "Del" },
 ];
 
-export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, onSwitchGrid, onJumpToCard }: CommandPaletteProps): React.JSX.Element {
+export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, onSwitchGrid, onJumpToCard, onJumpToFrame }: CommandPaletteProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +61,17 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
       })
     );
 
+    const frameItems: PaletteFrameItem[] = grids.current.flatMap((g) =>
+      g.frames.map((f) => ({
+        kind: "frame" as const,
+        id: f.id,
+        gridId: g.id,
+        gridName: g.name,
+        label: f.label || "Untitled Frame",
+        order: f.order,
+      }))
+    );
+
     if (query.trim() === "") {
       return [...ACTIONS, ...gridItems];
     }
@@ -65,10 +79,12 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
     const filteredActions = filterAndSort(ACTIONS, query, (a) => a.label, PALETTE_MAX_RESULTS);
     const filteredGrids = filterAndSort(gridItems, query, (g) => g.label, PALETTE_MAX_RESULTS);
     const filteredCards = filterAndSort(cardItems, query, (c) => c.label + " " + c.body, PALETTE_MAX_RESULTS);
+    const filteredFrames = filterAndSort(frameItems, query, (f) => f.label, PALETTE_MAX_RESULTS);
 
     return [
       ...filteredActions.map((r) => r.item),
       ...filteredGrids.map((r) => r.item),
+      ...filteredFrames.map((r) => r.item),
       ...filteredCards.map((r) => r.item),
     ].slice(0, PALETTE_MAX_RESULTS);
   }, [query, activeGridId]);
@@ -88,6 +104,7 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
       case "action": onExecuteAction(item.id); break;
       case "grid":   onSwitchGrid(item.id); break;
       case "card":   onJumpToCard(item.gridId, item.id); break;
+      case "frame":  onJumpToFrame(item.gridId, item.id); break;
     }
   }
 
@@ -112,6 +129,7 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
       case "action": return "ACTIONS";
       case "grid":   return "GRIDS";
       case "card":   return "CARDS";
+      case "frame":  return "FRAMES";
     }
   }
 
@@ -125,7 +143,7 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
         <input
           ref={inputRef}
           className="command-palette-input"
-          placeholder="Search cards, grids, actions..."
+          placeholder="Search cards, grids, frames, actions..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -150,6 +168,9 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
                 {item.kind === "grid" && item.isActive && (
                   <span className="command-palette-active-dot" />
                 )}
+                {item.kind === "frame" && (
+                  <span className="sidebar-frame-order" style={{ width: 16, height: 16, fontSize: 9 }}>{item.order}</span>
+                )}
                 <span className="command-palette-item-label">
                   {item.label}
                   {item.kind === "card" && item.body && (
@@ -164,6 +185,9 @@ export function CommandPalette({ grids, activeGridId, onClose, onExecuteAction, 
                     <span className="command-palette-grid-count">{item.cardCount}</span>
                   )}
                   {item.kind === "card" && (
+                    <span className="command-palette-grid-name">{item.gridName}</span>
+                  )}
+                  {item.kind === "frame" && (
                     <span className="command-palette-grid-name">{item.gridName}</span>
                   )}
                 </span>

@@ -56,7 +56,22 @@ export const CAMERA_LERP = 0.1;
 export const CAMERA_FOCAL_EPSILON = 0.5;
 export const CAMERA_ZOOM_EPSILON = 0.001;
 export const FIT_PADDING = 80;
+export const SIDEBAR_WIDTH = 244; // 220px panel + 12px left margin + 12px gap
 
 export const MAX_UNDO = 100;
 
 export const PALETTE_MAX_RESULTS = 12;
+
+export const FRAME_MIN_WIDTH = 240;
+export const FRAME_MIN_HEIGHT = 168;
+export const FRAME_MAX_WIDTH = 2400;
+export const FRAME_MAX_HEIGHT = 1800;
+export const FRAME_DEFAULT_WIDTH = 720;
+export const FRAME_DEFAULT_HEIGHT = 480;
+export const FRAME_BORDER_COLOR = "rgba(90, 138, 255, 0.25)";
+export const FRAME_SELECTED_BORDER = "#5a8aff";
+export const FRAME_FILL = "rgba(90, 138, 255, 0.02)";
+export const FRAME_LABEL_COLOR = "rgba(90, 138, 255, 0.5)";
+export const FRAME_LABEL_FONT_SIZE = 12;
+export const FRAME_LABEL_OFFSET_Y = -8;
+export const PRESENTATION_FIT_PADDING = 48;

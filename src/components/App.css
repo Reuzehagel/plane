@@ -544,3 +544,207 @@ canvas {
   font-family: var(--card-font);
   font-size: 13px;
 }
+
+/* ── Frame Label Editor ─────────────────────────────── */
+
+.frame-label-editor {
+  position: absolute;
+  z-index: 10;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent-color);
+  outline: none;
+  font-family: var(--card-font);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent-color);
+  padding: 0 2px;
+}
+
+/* ── Sidebar Frames ─────────────────────────────────── */
+
+.sidebar-frame-list {
+  padding: 0 8px 12px;
+}
+
+.sidebar-frame-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--card-font);
+  font-size: 11px;
+  background: transparent;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+}
+
+.sidebar-frame-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-frame-item.dragging {
+  opacity: 0.5;
+}
+
+.sidebar-frame-item.drag-over {
+  border-top: 2px solid var(--accent-color);
+}
+
+.sidebar-frame-order {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(90, 138, 255, 0.08);
+  border-radius: 4px;
+  color: var(--accent-color);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sidebar-frame-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #666;
+}
+
+.sidebar-frame-trailing {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.sidebar-frame-delete-btn {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: #555;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s, color 0.12s, background 0.12s;
+}
+
+.sidebar-frame-item:hover .sidebar-frame-delete-btn {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.sidebar-frame-delete-btn:hover {
+  background: rgba(255, 90, 90, 0.12);
+  color: #ff5a5a;
+}
+
+.sidebar-present-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: 1px solid #2a2a2a;
+  border-radius: 5px;
+  color: #555;
+  cursor: pointer;
+}
+
+.sidebar-present-btn:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+/* ── Presentation Overlay ───────────────────────────── */
+
+.presentation-wrapper {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: none;
+}
+
+.presentation-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(10, 10, 10, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 16px;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.presentation-label {
+  font-family: var(--card-font);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--card-text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-progress {
+  font-family: var(--card-font);
+  font-size: 11px;
+  color: #555;
+}
+
+.presentation-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.presentation-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #d0d0d0;
+}
+
+.presentation-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.presentation-exit {
+  margin-left: 4px;
+}
+
+.presentation-exit:hover {
+  background: rgba(255, 90, 90, 0.12);
+  color: #ff5a5a;
+  border-color: rgba(255, 90, 90, 0.2);
+}

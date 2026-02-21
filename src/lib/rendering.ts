@@ -1,4 +1,4 @@
-import type { BoxSelectState, Camera, Card } from "../types";
+import type { BoxSelectState, Camera, Card, Frame } from "../types";
 import { worldToScreen, getCardCorners } from "./geometry";
 import {
   DOT_SPACING, DOT_RADIUS, DOT_COLOR,
@@ -7,6 +7,8 @@ import {
   CARD_FONT_SIZE, CARD_TITLE_FONT, CARD_TEXT_PAD, CARD_TEXT_CLIP_PAD,
   CARD_ACCENT_HEIGHT, LINE_HEIGHT, CARD_BODY_COLOR,
   BG_COLOR, BOX_SELECT_FILL, BOX_SELECT_STROKE,
+  FRAME_BORDER_COLOR, FRAME_SELECTED_BORDER, FRAME_FILL,
+  FRAME_LABEL_COLOR, FRAME_LABEL_FONT_SIZE, FRAME_LABEL_OFFSET_Y,
 } from "../constants";
 import { wrapText } from "./textLayout";
 
@@ -52,6 +54,9 @@ export function drawScene(
   boxSelect: BoxSelectState | null,
   editingCardId: string | null = null,
   cardScrollOffsets: Map<string, number> = new Map(),
+  frames: Frame[] = [],
+  selectedFrameIds: Set<string> = new Set(),
+  editingFrameId: string | null = null,
 ): void {
   const { x: camX, y: camY, zoom } = camera;
 
@@ -79,6 +84,51 @@ export function drawScene(
       }
       ctx.fill();
     }
+  }
+
+  // Draw frames behind cards
+  for (const frame of frames) {
+    const { x: fx, y: fy } = worldToScreen(frame.x, frame.y, camera);
+    const fw = frame.width * zoom;
+    const fh = frame.height * zoom;
+    const selected = selectedFrameIds.has(frame.id);
+
+    // Subtle fill
+    ctx.fillStyle = FRAME_FILL;
+    ctx.fillRect(fx, fy, fw, fh);
+
+    // Dashed border
+    ctx.save();
+    ctx.setLineDash([6 * zoom, 4 * zoom]);
+    ctx.strokeStyle = selected ? FRAME_SELECTED_BORDER : FRAME_BORDER_COLOR;
+    ctx.lineWidth = selected ? 2 : 1;
+    ctx.strokeRect(fx, fy, fw, fh);
+    ctx.restore();
+
+    // Label above top-left (skip if being edited inline)
+    if (frame.id !== editingFrameId) {
+      const labelFontSize = FRAME_LABEL_FONT_SIZE * Math.min(zoom, 1.5);
+      const labelY = fy + FRAME_LABEL_OFFSET_Y * zoom;
+      ctx.font = `700 ${labelFontSize}px ${CARD_TITLE_FONT}`;
+      ctx.fillStyle = selected ? FRAME_SELECTED_BORDER : FRAME_LABEL_COLOR;
+      ctx.textBaseline = "bottom";
+      ctx.fillText(frame.label.toUpperCase(), fx + 2 * zoom, labelY);
+    }
+
+    // Order badge in top-right corner
+    const badgeSize = 18 * Math.min(zoom, 1.5);
+    const badgeX = fx + fw - badgeSize - 4 * zoom;
+    const badgeY = fy + 4 * zoom;
+    const badgeR = 4 * Math.min(zoom, 1.5);
+    const badgePath = roundRectPath(badgeX, badgeY, badgeSize, badgeSize, badgeR);
+    ctx.fillStyle = selected ? "rgba(90, 138, 255, 0.2)" : "rgba(90, 138, 255, 0.08)";
+    ctx.fill(badgePath);
+    ctx.font = `700 ${10 * Math.min(zoom, 1.5)}px ${CARD_TITLE_FONT}`;
+    ctx.fillStyle = selected ? FRAME_SELECTED_BORDER : FRAME_LABEL_COLOR;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(String(frame.order), badgeX + badgeSize / 2, badgeY + badgeSize / 2);
+    ctx.textAlign = "left";
   }
 
   const sr = CARD_RADIUS * zoom;
@@ -223,13 +273,32 @@ export function drawScene(
     }
   }
 
-  // Draw handles on top of all cards
+  // Draw card handles on top of all cards
   ctx.fillStyle = CARD_SELECTED_BORDER;
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 1;
 
   for (const { sx, sy, sw, sh } of selectedRects) {
     for (const [cx, cy] of getCardCorners(sx, sy, sw, sh)) {
+      const hx = cx - HALF_HANDLE;
+      const hy = cy - HALF_HANDLE;
+      ctx.fillRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);
+      ctx.strokeRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);
+    }
+  }
+
+  // Draw frame handles after card handles
+  for (const frame of frames) {
+    if (!selectedFrameIds.has(frame.id)) continue;
+    const { x: fx, y: fy } = worldToScreen(frame.x, frame.y, camera);
+    const fw = frame.width * zoom;
+    const fh = frame.height * zoom;
+    const corners = getCardCorners(fx, fy, fw, fh);
+
+    ctx.fillStyle = FRAME_SELECTED_BORDER;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    for (const [cx, cy] of corners) {
       const hx = cx - HALF_HANDLE;
       const hy = cy - HALF_HANDLE;
       ctx.fillRect(hx, hy, HANDLE_SIZE, HANDLE_SIZE);

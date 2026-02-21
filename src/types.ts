@@ -38,9 +38,33 @@ export interface BoxSelectState {
   current: Point;
 }
 
+export interface Frame {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  order: number;
+}
+
+export interface FrameSummary {
+  id: string;
+  label: string;
+  order: number;
+}
+
+export interface PresentationState {
+  frameIndex: number;
+  frames: Frame[];
+  savedCamera: Camera;
+}
+
 export interface Snapshot {
   cards: Card[];
   selectedCardIds: Set<string>;
+  frames: Frame[];
+  selectedFrameIds: Set<string>;
 }
 
 export interface History {
@@ -54,12 +78,13 @@ export interface ContextMenuState {
   worldX: number;
   worldY: number;
   cardId: string | null;
+  frameId: string | null;
 }
 
 export type HandleCorner = "nw" | "ne" | "sw" | "se";
 
 export interface ResizeState {
-  card: Card;
+  item: { x: number; y: number; width: number; height: number };
   handle: HandleCorner;
   startMouseX: number;
   startMouseY: number;
@@ -67,6 +92,10 @@ export interface ResizeState {
   startY: number;
   startWidth: number;
   startHeight: number;
+  minW: number;
+  minH: number;
+  maxW: number;
+  maxH: number;
 }
 
 export interface ResizeTarget {
@@ -80,6 +109,7 @@ export interface Grid {
   id: string;
   name: string;
   cards: Card[];
+  frames: Frame[];
   camera: Camera;
 }
 
@@ -114,4 +144,13 @@ export interface PaletteCardItem {
   color: string;
 }
 
-export type PaletteItem = PaletteActionItem | PaletteGridItem | PaletteCardItem;
+export interface PaletteFrameItem {
+  kind: "frame";
+  id: string;
+  gridId: string;
+  gridName: string;
+  label: string;
+  order: number;
+}
+
+export type PaletteItem = PaletteActionItem | PaletteGridItem | PaletteCardItem | PaletteFrameItem;
